@@ -13,15 +13,21 @@ micromamba run -n base python3 app.py
 
 Then open http://localhost:8000.
 
-## Input Files
+## Getting Started
 
-The server reads from `input/`:
+On launch, a setup dialog prompts for an input folder path. You can type a path directly or click **Browse** to navigate the filesystem visually. The browser shows a green checkmark when the current directory contains valid input files, and the **Select** button fills the path for you.
+
+## Input Folder Structure
+
+Point the browser at any folder containing:
 
 | File | Description |
 |------|-------------|
-| `Phvul.007G077500.1.nwk` | Newick tree |
-| `Phvul.007G077500.1.csv.aa.fa` | Gapped protein alignment (FASTA) |
-| `orthofinder-input/*.fa` | Per-species FASTA files (used to map tips to species) |
+| `*.nwk` | Newick tree (exactly one) |
+| `*.aa.fa` | Gapped protein alignment (exactly one) |
+| `orthofinder-input/*.fa` | Per-species FASTA files for tip-to-species mapping (optional) |
+
+An example dataset is provided in `example_data/`.
 
 ## Features
 
@@ -65,6 +71,9 @@ The server reads from `input/`:
 
 | Endpoint | Description |
 |----------|-------------|
+| `GET /api/browse?path=...` | List subdirectories, detect valid input files |
+| `POST /api/load` | Load an input folder (`{"input_dir": "..."}`) |
+| `GET /api/status` | Check if data is loaded |
 | `GET /api/tree` | Full tree as JSON |
 | `GET /api/species` | Species list and species-to-tips mapping |
 | `GET /api/motif?pattern=...&type=regex` | Motif search (regex or prosite) |
@@ -93,5 +102,5 @@ browser/
     index.html    # Single-page app
     app.js        # All client-side logic
     style.css     # Styling
-input/              # Tree, alignment, and species data
+example_data/       # Example tree, alignment, and species data
 ```

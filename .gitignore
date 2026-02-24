@@ -1,5 +1,7 @@
 # Project instructions (local only)
 CLAUDE.md
+prompts.md
+lessons.md
 
 # Claude Code internal
 .claude/
