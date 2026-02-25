@@ -27,6 +27,10 @@ let exportNodeId = null;         // currently selected node for export
 let allTipNames = [];            // cached for export validation
 let fullTreeData = null;         // stores the original tree when viewing a subtree
 let hasFasta = false;            // whether alignment data is available
+let fastMode = false;            // performance mode for large trees
+let selectedTip = null;          // tip name highlighted with red circle from name search
+let renderCache = null;          // cached SVG fragment string for fast mode
+let renderCacheKey = null;       // key to invalidate cache
 
 // Pan / zoom state
 let scale = 1, tx = 20, ty = 20;
@@ -106,6 +110,13 @@ function countAllTips(node) {
   return n;
 }
 
+function collectAllTipNames(node) {
+  if (!node.ch || node.ch.length === 0) return [node.name];
+  const names = [];
+  for (const c of node.ch) names.push(...collectAllTipNames(c));
+  return names;
+}
+
 function deepCopyNode(node) {
   const copy = { ...node };
   if (node.ch) copy.ch = node.ch.map(deepCopyNode);
@@ -146,7 +157,7 @@ function getNodeColor(node, checkedSpecies) {
 // Init
 // ---------------------------------------------------------------------------
 async function init() {
-  // Fetch status to get has_fasta flag
+  // Fetch status to get has_fasta flag and file info
   const statusResp = await fetch("/api/status").then(r => r.json());
   hasFasta = !!statusResp.has_fasta;
 
@@ -170,16 +181,46 @@ async function init() {
 
   indexNodes(treeData);
 
-  // Auto-hide tip labels for large trees
+  // Show loaded data info
   const totalTips = countAllTips(treeData);
+  showLoadedInfo(statusResp, totalTips);
+
+  // Auto-hide tip labels for large trees
   if (totalTips > 1000) {
     showTipLabels = false;
     document.getElementById("tip-labels-toggle").checked = false;
   }
 
+  // Auto-enable fast mode for large trees
+  if (totalTips > 1000) {
+    fastMode = true;
+    document.getElementById("fast-mode-toggle").checked = true;
+  }
+
   buildSpeciesList(speciesList);
   buildExcludeSpeciesList(speciesList);
   setupControls();
+
+  // Auto-collapse for huge trees: find clades at a "sweet spot" size
+  // so the major branching structure stays visible but leaf-heavy clades
+  // are collapsed. Target: ~20-50 visible groups.
+  if (totalTips > 2000 && fastMode && treeData.ch) {
+    const targetLeaves = 50;  // aim for roughly this many visible terminal units
+    const collapseThreshold = Math.max(20, Math.floor(totalTips / targetLeaves));
+    function autoCollapse(node) {
+      if (!node.ch || node.ch.length === 0) return;
+      const tips = countAllTips(node);
+      // If this clade is small enough to be a good collapsed unit, collapse it
+      if (tips <= collapseThreshold && tips > 1) {
+        collapsedNodes.add(node.id);
+        return; // don't recurse deeper
+      }
+      // Otherwise keep it expanded and check children
+      for (const child of node.ch) autoCollapse(child);
+    }
+    for (const child of treeData.ch) autoCollapse(child);
+  }
+
   renderTree();
   if (hasFasta) {
     loadTipDatalist();
@@ -232,6 +273,10 @@ function indexNodes(node) {
 function buildSpeciesList(speciesList) {
   const container = document.getElementById("species-list");
   container.innerHTML = "";
+  if (speciesList.length === 0) {
+    container.innerHTML = '<p class="hint">No species-specific FASTAs loaded</p>';
+    return;
+  }
   for (const sp of speciesList) {
     const label = document.createElement("label");
     const cb = document.createElement("input");
@@ -284,6 +329,11 @@ function setupControls() {
   });
   document.getElementById("length-toggle").addEventListener("change", e => {
     showLengths = e.target.checked;
+    renderTree();
+  });
+  document.getElementById("fast-mode-toggle").addEventListener("change", e => {
+    fastMode = e.target.checked;
+    invalidateRenderCache();
     renderTree();
   });
   document.getElementById("uniform-triangles-toggle").addEventListener("change", e => {
@@ -391,7 +441,7 @@ function applyTransform() {
 function searchName() {
   const query = document.getElementById("name-input").value.trim();
   const listEl = document.getElementById("name-matches-list");
-  if (!query) { nameMatches = new Set(); listEl.textContent = ""; renderTree(); return; }
+  if (!query) { nameMatches = new Set(); selectedTip = null; listEl.innerHTML = ""; renderTree(); return; }
   try {
     const re = new RegExp(query, "i");
     // Collect all tip names from tree
@@ -404,15 +454,53 @@ function searchName() {
     const matched = allTips.filter(name => re.test(name));
     nameMatches = new Set(matched);
     document.getElementById("name-result").textContent = `${nameMatches.size} tips matched`;
-    // Show up to 10 matching names
-    const shown = matched.slice(0, 10);
-    listEl.textContent = shown.join("\n") + (matched.length > 10 ? `\n... and ${matched.length - 10} more` : "");
+    // Build clickable list
+    listEl.innerHTML = "";
+    for (const tipName of matched) {
+      const item = document.createElement("div");
+      item.className = "name-match-item";
+      item.textContent = tipName;
+      if (tipName === selectedTip) item.classList.add("name-match-active");
+      item.addEventListener("click", () => selectNameTip(tipName));
+      listEl.appendChild(item);
+    }
   } catch (e) {
     document.getElementById("name-result").textContent = `Invalid regex: ${e.message}`;
     nameMatches = new Set();
-    listEl.textContent = "";
+    listEl.innerHTML = "";
   }
   renderTree();
+}
+
+function selectNameTip(tipName) {
+  selectedTip = tipName;
+  // Copy FASTA to clipboard if alignment loaded, or warn if missing
+  const resultEl = document.getElementById("name-result");
+  if (hasFasta) {
+    const tipSet = new Set(allTipNames);
+    if (!tipSet.has(tipName)) {
+      resultEl.innerHTML = `<span style="color:#c0392b">Sequence not found in alignment: ${tipName}</span>`;
+    } else {
+      resultEl.textContent = `${nameMatches.size} tips matched`;
+      copyTipFasta(tipName);
+    }
+  }
+  // Update active state in list
+  document.querySelectorAll(".name-match-item").forEach(el => {
+    el.classList.toggle("name-match-active", el.textContent === tipName);
+  });
+  invalidateRenderCache();
+  renderTree();
+  // Center view on the selected tip's ring
+  const ring = group.querySelector(".selected-tip-ring");
+  if (ring) {
+    const cx = parseFloat(ring.getAttribute("cx"));
+    const cy = parseFloat(ring.getAttribute("cy"));
+    const rect = svg.getBoundingClientRect();
+    tx = rect.width / 2 - cx * scale;
+    ty = rect.height / 2 - cy * scale;
+    applyTransform();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -548,6 +636,32 @@ async function highlightSharedNodes() {
 }
 
 // ===========================================================================
+// Render cache helpers (fast mode)
+// ===========================================================================
+function invalidateRenderCache() {
+  renderCache = null;
+  renderCacheKey = null;
+}
+
+function getRenderCacheKey(checkedSpecies) {
+  return [
+    layoutMode,
+    usePhylogram,
+    tipSpacing,
+    triangleScale,
+    uniformTriangles,
+    [...collapsedNodes].sort().join(","),
+    [...checkedSpecies].sort().join(","),
+    [...nameMatches].sort().join(","),
+    [...motifMatches].sort().join(","),
+    [...sharedNodes].sort().join(","),
+    exportNodeId,
+    selectedTip,
+    fastMode,
+  ].join("|");
+}
+
+// ===========================================================================
 // RENDERING — dispatch by layout mode
 // ===========================================================================
 function renderTree() {
@@ -555,6 +669,20 @@ function renderTree() {
   const checkedSpecies = new Set(
     [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species)
   );
+
+  // Fast mode render cache
+  if (fastMode) {
+    const key = getRenderCacheKey(checkedSpecies);
+    if (renderCache && renderCacheKey === key) {
+      group.innerHTML = renderCache;
+      group.addEventListener("click", onTreeClick);
+      group.addEventListener("mouseover", onTreeHover);
+      group.addEventListener("mouseout", () => { tooltip.style.display = "none"; });
+      applyTransform();
+      return;
+    }
+  }
+
   const fragments = [];
 
   if (layoutMode === "rectangular") {
@@ -565,7 +693,14 @@ function renderTree() {
     renderUnrooted(fragments, checkedSpecies);
   }
 
-  group.innerHTML = fragments.join("\n");
+  const html = fragments.join("\n");
+
+  if (fastMode) {
+    renderCache = html;
+    renderCacheKey = getRenderCacheKey(checkedSpecies);
+  }
+
+  group.innerHTML = html;
   group.addEventListener("click", onTreeClick);
   group.addEventListener("mouseover", onTreeHover);
   group.addEventListener("mouseout", () => { tooltip.style.display = "none"; });
@@ -610,6 +745,11 @@ function renderRectangular(fragments, checkedSpecies) {
 
   const root = layout(treeData, 0);
 
+  if (fastMode) {
+    drawFastRectangular(fragments, root, checkedSpecies);
+    return;
+  }
+
   function draw(node) {
     const px = node.parentX, nx = node.x, ny = node.y;
     const color = getNodeColor(node, checkedSpecies);
@@ -623,6 +763,9 @@ function renderRectangular(fragments, checkedSpecies) {
         `<polygon points="${nx},${ny} ${nx + triW},${ny - triH / 2} ${nx + triW},${ny + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
         `<text x="${nx + triW + 4}" y="${ny + 3}" font-size="9" fill="#666">${node.tipCount} tips</text>`
       );
+      if (selectedTip && collectAllTipNames(node).includes(selectedTip)) {
+        fragments.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+      }
       return;
     }
     if (node.layoutChildren) {
@@ -676,6 +819,11 @@ function renderCircular(fragments, checkedSpecies) {
     return [r * Math.cos(angle), r * Math.sin(angle)];
   }
 
+  if (fastMode) {
+    drawFastCircular(fragments, root, checkedSpecies, toXY);
+    return;
+  }
+
   function draw(node) {
     const [nx, ny] = toXY(node.r, node.angle);
     const [px, py] = toXY(node.parentR, node.angle);
@@ -695,6 +843,9 @@ function renderCircular(fragments, checkedSpecies) {
         `<path d="M${nx},${ny} L${wx1},${wy1} A${wedgeR},${wedgeR} 0 ${large},1 ${wx2},${wy2} Z" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
         `<text x="${(wx1 + wx2) / 2 + 4}" y="${(wy1 + wy2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
       );
+      if (selectedTip && collectAllTipNames(node).includes(selectedTip)) {
+        fragments.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+      }
       return;
     }
     if (node.layoutChildren) {
@@ -765,6 +916,11 @@ function renderUnrooted(fragments, checkedSpecies) {
 
   const root = layout(treeData, 0, 0, 0, 2 * Math.PI, 0);
 
+  if (fastMode) {
+    drawFastUnrooted(fragments, root, checkedSpecies);
+    return;
+  }
+
   function draw(node) {
     const color = getNodeColor(node, checkedSpecies);
 
@@ -783,6 +939,9 @@ function renderUnrooted(fragments, checkedSpecies) {
         `<polygon points="${node.x},${node.y} ${x1},${y1} ${x2},${y2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
         `<text x="${(x1 + x2) / 2 + 2}" y="${(y1 + y2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
       );
+      if (selectedTip && collectAllTipNames(node).includes(selectedTip)) {
+        fragments.push(`<circle cx="${node.x}" cy="${node.y}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+      }
       return;
     }
     if (node.layoutChildren) {
@@ -830,6 +989,10 @@ function drawTipDot(fragments, cx, cy, node, checkedSpecies) {
   const isName = nameMatches.has(node.name);
   const spColor = getNodeColor(node, checkedSpecies);
   const r = (isMotif || isName || spColor !== "#333") ? 3 : 2;
+  // Large red circle for selected tip from name search
+  if (node.name === selectedTip) {
+    fragments.push(`<circle cx="${cx}" cy="${cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+  }
   if (isMotif) {
     const colors = getMotifColors(node.name);
     if (colors.length > 0) {
@@ -894,6 +1057,321 @@ function drawTipLabelRadial(fragments, x, y, angleDeg, anchor, node, checkedSpec
   }
 }
 
+// ===========================================================================
+// Fast-mode batched drawing helpers
+// ===========================================================================
+function drawFastRectangular(fragments, root, checkedSpecies) {
+  // Collect all geometry in arrays, then emit batched SVG elements
+  const branchPaths = [];   // horizontal branch lines
+  const vlinePaths = [];    // vertical connector lines
+  const dotData = [];       // {cx, cy, r, fill, nodeId, sup, isTip, tipName, species}
+  const triangles = [];     // collapsed triangle fragments (kept individual for interactivity)
+
+  function collect(node) {
+    const px = node.parentX, nx = node.x, ny = node.y;
+    const color = getNodeColor(node, checkedSpecies);
+
+    // Horizontal branch
+    branchPaths.push({ x1: px, y1: ny, x2: nx, y2: ny, color });
+
+    if (node.collapsed) {
+      const triH = (uniformTriangles ? 30 : Math.min(node.tipCount * 2, 40)) * triangleScale / 100;
+      const triW = 30 * triangleScale / 100;
+      triangles.push(
+        `<polygon points="${nx},${ny} ${nx + triW},${ny - triH / 2} ${nx + triW},${ny + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+        `<text x="${nx + triW + 4}" y="${ny + 3}" font-size="9" fill="#666">${node.tipCount} tips</text>`
+      );
+      if (selectedTip && collectAllTipNames(node).includes(selectedTip)) {
+        triangles.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+      }
+      return;
+    }
+    if (node.layoutChildren) {
+      const firstY = node.layoutChildren[0].y;
+      const lastY = node.layoutChildren[node.layoutChildren.length - 1].y;
+      vlinePaths.push({ x: nx, y1: firstY, y2: lastY });
+
+      // Internal node dot
+      const isSelected = node.id === exportNodeId;
+      const isShared = sharedNodes.has(node.id);
+      dotData.push({
+        cx: nx, cy: ny,
+        r: isSelected ? 6 : isShared ? 5 : 3,
+        fill: isSelected ? '#000' : isShared ? '#ff6600' : '#999',
+        nodeId: node.id, sup: node.sup, isTip: false
+      });
+      node.layoutChildren.forEach(collect);
+    } else {
+      // Tip dot — simplified: single color, no pie charts
+      const isMotif = motifMatches.has(node.name);
+      const isName = nameMatches.has(node.name);
+      const spColor = getNodeColor(node, checkedSpecies);
+      let fill = '#333';
+      if (isMotif) {
+        const colors = getMotifColors(node.name);
+        fill = colors.length > 0 ? colors[0] : '#e22';
+      } else if (isName) {
+        fill = '#2563eb';
+      } else {
+        fill = spColor;
+      }
+      const r = (isMotif || isName || spColor !== "#333") ? 3 : 2;
+      dotData.push({
+        cx: nx, cy: ny, r, fill,
+        isTip: true, tipName: node.name, species: node.sp || ''
+      });
+    }
+  }
+  collect(root);
+
+  // Emit batched branches grouped by color
+  const byColor = {};
+  for (const b of branchPaths) {
+    if (!byColor[b.color]) byColor[b.color] = [];
+    byColor[b.color].push(`M${b.x1},${b.y1}L${b.x2},${b.y2}`);
+  }
+  for (const [color, segs] of Object.entries(byColor)) {
+    fragments.push(`<path d="${segs.join("")}" stroke="${color}" stroke-width="1" fill="none"/>`);
+  }
+
+  // Emit batched vertical lines
+  if (vlinePaths.length > 0) {
+    const vSegs = vlinePaths.map(v => `M${v.x},${v.y1}L${v.x},${v.y2}`).join("");
+    fragments.push(`<path d="${vSegs}" stroke="#999" stroke-width="1" fill="none"/>`);
+  }
+
+  // Emit triangles (individual for click interactivity)
+  for (const t of triangles) fragments.push(t);
+
+  // Emit batched dots grouped by fill+radius
+  const dotGroups = {};
+  for (const d of dotData) {
+    const key = `${d.fill}|${d.r}`;
+    if (!dotGroups[key]) dotGroups[key] = { fill: d.fill, r: d.r, dots: [] };
+    dotGroups[key].dots.push(d);
+  }
+  for (const g of Object.values(dotGroups)) {
+    // For interactivity, tip dots and node dots need data attributes — use individual circles
+    // but batch them into a single <g> to reduce layout overhead
+    const circles = g.dots.map(d => {
+      if (d.isTip) {
+        return `<circle cx="${d.cx}" cy="${d.cy}" r="${g.r}" fill="${g.fill}" class="tip-dot" data-tip="${d.tipName}" data-species="${d.species}"/>`;
+      } else {
+        return `<circle cx="${d.cx}" cy="${d.cy}" r="${g.r}" fill="${g.fill}" class="node-dot" data-nodeid="${d.nodeId}"${d.sup != null ? ` data-support="${d.sup}"` : ''}/>`;
+      }
+    }).join("");
+    fragments.push(`<g>${circles}</g>`);
+  }
+  // Selected tip red ring
+  if (selectedTip) {
+    const st = dotData.find(d => d.isTip && d.tipName === selectedTip);
+    if (st) fragments.push(`<circle cx="${st.cx}" cy="${st.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+  }
+}
+
+function drawFastCircular(fragments, root, checkedSpecies, toXY) {
+  const branchPaths = [];
+  const arcPaths = [];
+  const dotData = [];
+  const triangles = [];
+
+  function collect(node) {
+    const [nx, ny] = toXY(node.r, node.angle);
+    const [px, py] = toXY(node.parentR, node.angle);
+    const color = getNodeColor(node, checkedSpecies);
+
+    branchPaths.push({ x1: px, y1: py, x2: nx, y2: ny, color });
+
+    if (node.collapsed) {
+      const wedgeR = node.r + 20 * triangleScale / 100;
+      const halfArc = (uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * triangleScale / 100;
+      const [wx1, wy1] = toXY(wedgeR, node.angle - halfArc);
+      const [wx2, wy2] = toXY(wedgeR, node.angle + halfArc);
+      const large = halfArc * 2 > Math.PI ? 1 : 0;
+      triangles.push(
+        `<path d="M${nx},${ny} L${wx1},${wy1} A${wedgeR},${wedgeR} 0 ${large},1 ${wx2},${wy2} Z" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+        `<text x="${(wx1 + wx2) / 2 + 4}" y="${(wy1 + wy2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
+      );
+      if (selectedTip && collectAllTipNames(node).includes(selectedTip)) {
+        triangles.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+      }
+      return;
+    }
+    if (node.layoutChildren) {
+      const a1 = node.layoutChildren[0].angle;
+      const a2 = node.layoutChildren[node.layoutChildren.length - 1].angle;
+      const [ax1, ay1] = toXY(node.r, a1);
+      const [ax2, ay2] = toXY(node.r, a2);
+      const sweep = a2 - a1;
+      const large = sweep > Math.PI ? 1 : 0;
+      arcPaths.push(`M${ax1},${ay1} A${node.r},${node.r} 0 ${large},1 ${ax2},${ay2}`);
+
+      const isSelected = node.id === exportNodeId;
+      const isShared = sharedNodes.has(node.id);
+      dotData.push({
+        cx: nx, cy: ny,
+        r: isSelected ? 6 : isShared ? 5 : 3,
+        fill: isSelected ? '#000' : isShared ? '#ff6600' : '#999',
+        nodeId: node.id, sup: node.sup, isTip: false
+      });
+      node.layoutChildren.forEach(collect);
+    } else {
+      const isMotif = motifMatches.has(node.name);
+      const isName = nameMatches.has(node.name);
+      const spColor = getNodeColor(node, checkedSpecies);
+      let fill = '#333';
+      if (isMotif) {
+        const colors = getMotifColors(node.name);
+        fill = colors.length > 0 ? colors[0] : '#e22';
+      } else if (isName) {
+        fill = '#2563eb';
+      } else {
+        fill = spColor;
+      }
+      const r = (isMotif || isName || spColor !== "#333") ? 3 : 2;
+      dotData.push({
+        cx: nx, cy: ny, r, fill,
+        isTip: true, tipName: node.name, species: node.sp || ''
+      });
+    }
+  }
+  collect(root);
+
+  // Batched branches by color
+  const byColor = {};
+  for (const b of branchPaths) {
+    if (!byColor[b.color]) byColor[b.color] = [];
+    byColor[b.color].push(`M${b.x1},${b.y1}L${b.x2},${b.y2}`);
+  }
+  for (const [color, segs] of Object.entries(byColor)) {
+    fragments.push(`<path d="${segs.join("")}" stroke="${color}" stroke-width="1" fill="none"/>`);
+  }
+
+  // Batched arcs
+  if (arcPaths.length > 0) {
+    fragments.push(`<path d="${arcPaths.join("")}" stroke="#999" stroke-width="1" fill="none"/>`);
+  }
+
+  for (const t of triangles) fragments.push(t);
+
+  // Batched dots
+  const dotGroups = {};
+  for (const d of dotData) {
+    const key = `${d.fill}|${d.r}`;
+    if (!dotGroups[key]) dotGroups[key] = { fill: d.fill, r: d.r, dots: [] };
+    dotGroups[key].dots.push(d);
+  }
+  for (const g of Object.values(dotGroups)) {
+    const circles = g.dots.map(d => {
+      if (d.isTip) {
+        return `<circle cx="${d.cx}" cy="${d.cy}" r="${g.r}" fill="${g.fill}" class="tip-dot" data-tip="${d.tipName}" data-species="${d.species}"/>`;
+      } else {
+        return `<circle cx="${d.cx}" cy="${d.cy}" r="${g.r}" fill="${g.fill}" class="node-dot" data-nodeid="${d.nodeId}"${d.sup != null ? ` data-support="${d.sup}"` : ''}/>`;
+      }
+    }).join("");
+    fragments.push(`<g>${circles}</g>`);
+  }
+  // Selected tip red ring
+  if (selectedTip) {
+    const st = dotData.find(d => d.isTip && d.tipName === selectedTip);
+    if (st) fragments.push(`<circle cx="${st.cx}" cy="${st.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+  }
+}
+
+function drawFastUnrooted(fragments, root, checkedSpecies) {
+  const branchPaths = [];
+  const dotData = [];
+  const triangles = [];
+
+  function collect(node) {
+    const color = getNodeColor(node, checkedSpecies);
+
+    branchPaths.push({ x1: node.parentX, y1: node.parentY, x2: node.x, y2: node.y, color });
+
+    if (node.collapsed) {
+      const fanLen = 20 * triangleScale / 100;
+      const halfW = (uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * triangleScale / 100;
+      const x1 = node.x + fanLen * Math.cos(node.angle - halfW);
+      const y1 = node.y + fanLen * Math.sin(node.angle - halfW);
+      const x2 = node.x + fanLen * Math.cos(node.angle + halfW);
+      const y2 = node.y + fanLen * Math.sin(node.angle + halfW);
+      triangles.push(
+        `<polygon points="${node.x},${node.y} ${x1},${y1} ${x2},${y2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+        `<text x="${(x1 + x2) / 2 + 2}" y="${(y1 + y2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
+      );
+      if (selectedTip && collectAllTipNames(node).includes(selectedTip)) {
+        triangles.push(`<circle cx="${node.x}" cy="${node.y}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+      }
+      return;
+    }
+    if (node.layoutChildren) {
+      const isSelected = node.id === exportNodeId;
+      const isShared = sharedNodes.has(node.id);
+      dotData.push({
+        cx: node.x, cy: node.y,
+        r: isSelected ? 6 : isShared ? 5 : 3,
+        fill: isSelected ? '#000' : isShared ? '#ff6600' : '#999',
+        nodeId: node.id, sup: node.sup, isTip: false
+      });
+      node.layoutChildren.forEach(collect);
+    } else {
+      const isMotif = motifMatches.has(node.name);
+      const isName = nameMatches.has(node.name);
+      const spColor = getNodeColor(node, checkedSpecies);
+      let fill = '#333';
+      if (isMotif) {
+        const colors = getMotifColors(node.name);
+        fill = colors.length > 0 ? colors[0] : '#e22';
+      } else if (isName) {
+        fill = '#2563eb';
+      } else {
+        fill = spColor;
+      }
+      const r = (isMotif || isName || spColor !== "#333") ? 3 : 2;
+      dotData.push({
+        cx: node.x, cy: node.y, r, fill,
+        isTip: true, tipName: node.name, species: node.sp || ''
+      });
+    }
+  }
+  collect(root);
+
+  // Batched branches by color
+  const byColor = {};
+  for (const b of branchPaths) {
+    if (!byColor[b.color]) byColor[b.color] = [];
+    byColor[b.color].push(`M${b.x1},${b.y1}L${b.x2},${b.y2}`);
+  }
+  for (const [color, segs] of Object.entries(byColor)) {
+    fragments.push(`<path d="${segs.join("")}" stroke="${color}" stroke-width="1" fill="none"/>`);
+  }
+
+  for (const t of triangles) fragments.push(t);
+
+  // Batched dots
+  const dotGroups = {};
+  for (const d of dotData) {
+    const key = `${d.fill}|${d.r}`;
+    if (!dotGroups[key]) dotGroups[key] = { fill: d.fill, r: d.r, dots: [] };
+    dotGroups[key].dots.push(d);
+  }
+  for (const g of Object.values(dotGroups)) {
+    const circles = g.dots.map(d => {
+      if (d.isTip) {
+        return `<circle cx="${d.cx}" cy="${d.cy}" r="${g.r}" fill="${g.fill}" class="tip-dot" data-tip="${d.tipName}" data-species="${d.species}"/>`;
+      } else {
+        return `<circle cx="${d.cx}" cy="${d.cy}" r="${g.r}" fill="${g.fill}" class="node-dot" data-nodeid="${d.nodeId}"${d.sup != null ? ` data-support="${d.sup}"` : ''}/>`;
+      }
+    }).join("");
+    fragments.push(`<g>${circles}</g>`);
+  }
+  // Selected tip red ring
+  if (selectedTip) {
+    const st = dotData.find(d => d.isTip && d.tipName === selectedTip);
+    if (st) fragments.push(`<circle cx="${st.cx}" cy="${st.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Interaction handlers
 // ---------------------------------------------------------------------------
@@ -917,6 +1395,7 @@ function onTreeClick(e) {
     if (e.shiftKey) {
       if (collapsedNodes.has(nid)) collapsedNodes.delete(nid);
       else collapsedNodes.add(nid);
+      invalidateRenderCache();
       renderTree();
       return;
     }
@@ -931,7 +1410,16 @@ async function copyNodeFasta(nodeId) {
     const resp = await fetch(`/api/export?node_id=${nodeId}`);
     const fasta = await resp.text();
     await navigator.clipboard.writeText(fasta);
-    tooltip.textContent = `Aligned FASTA copied (node #${nodeId})`;
+    // Check if any tips were missing from alignment
+    const node = nodeById[nodeId];
+    let warn = "";
+    if (hasFasta && allTipNames.length > 0 && node) {
+      const alnSet = new Set(allTipNames);
+      const nodeTips = collectAllTipNames(node);
+      const missing = nodeTips.filter(t => !alnSet.has(t));
+      if (missing.length > 0) warn = ` (${missing.length} tip${missing.length !== 1 ? "s" : ""} missing from alignment)`;
+    }
+    tooltip.textContent = `Aligned FASTA copied (node #${nodeId})${warn}`;
     tooltip.style.display = "block";
   } catch (e) {
     tooltip.textContent = "Copy failed";
@@ -943,7 +1431,11 @@ async function copyTipFasta(tipName) {
   try {
     const resp = await fetch(`/api/tip-seq?name=${encodeURIComponent(tipName)}`);
     const data = await resp.json();
-    if (data.error) return;
+    if (data.error) {
+      tooltip.textContent = `Sequence not found in alignment: ${tipName}`;
+      tooltip.style.display = "block";
+      return;
+    }
     const fasta = `>${data.name}\n${data.seq}`;
     await navigator.clipboard.writeText(fasta);
     tooltip.textContent = "Copied to clipboard!";
@@ -956,14 +1448,19 @@ function buildTipTooltip(tipName, species) {
   const lines = [tipName];
   lines.push(`Species: ${species || "unknown"}`);
   if (hasFasta) {
-    const len = tipLengths[tipName];
-    if (len != null) lines.push(`Length: ${len} aa`);
-    // Matching motifs
-    const matching = motifList.filter(m => m.tipNames.includes(tipName));
-    if (matching.length > 0) {
-      lines.push(`Motifs: ${matching.map(m => m.pattern).join(", ")}`);
+    const alnSet = new Set(allTipNames);
+    if (!alnSet.has(tipName)) {
+      lines.push("⚠ Sequence not found in alignment");
+    } else {
+      const len = tipLengths[tipName];
+      if (len != null) lines.push(`Length: ${len} aa`);
+      // Matching motifs
+      const matching = motifList.filter(m => m.tipNames.includes(tipName));
+      if (matching.length > 0) {
+        lines.push(`Motifs: ${matching.map(m => m.pattern).join(", ")}`);
+      }
+      lines.push("Click to copy FASTA");
     }
-    lines.push("Click to copy FASTA");
   }
   return lines.join("\n");
 }
@@ -1003,8 +1500,22 @@ async function openExportPanel(nodeId) {
   buildMotifList();  // refresh per-node counts
   renderTree();      // re-render to show selected node dot
 
-  document.getElementById("export-info").textContent =
-    `Node #${nodeId} — ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
+  // Check for tips missing from alignment
+  let missingTips = [];
+  if (hasFasta && allTipNames.length > 0) {
+    const alnSet = new Set(allTipNames);
+    missingTips = tips.filter(t => !alnSet.has(t));
+  }
+
+  const infoEl = document.getElementById("export-info");
+  if (missingTips.length > 0) {
+    infoEl.innerHTML =
+      `Node #${nodeId} — ${tips.length} tip${tips.length !== 1 ? "s" : ""}` +
+      `<br><span style="color:#c0392b">${missingTips.length} tip${missingTips.length !== 1 ? "s" : ""} not in alignment: ${missingTips.slice(0, 5).join(", ")}${missingTips.length > 5 ? ", ..." : ""}</span>`;
+  } else {
+    infoEl.textContent =
+      `Node #${nodeId} — ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
+  }
   document.getElementById("export-tips-summary").textContent =
     `Tip names (${tips.length})`;
 
@@ -1020,6 +1531,12 @@ async function openExportPanel(nodeId) {
   document.getElementById("export-ref-start").value = "";
   document.getElementById("export-ref-end").value = "";
   document.getElementById("export-result").textContent = "";
+
+  // Show newick export panel
+  document.getElementById("newick-form").style.display = "";
+  document.getElementById("newick-info").textContent =
+    `Node #${nodeId} — ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
+  document.getElementById("newick-result").textContent = "";
 
   // Scroll panel into view
   document.getElementById("export-section").scrollIntoView({ behavior: "smooth" });
@@ -1088,6 +1605,78 @@ function doExport() {
   resultEl.style.color = "#27ae60";
   resultEl.textContent = "Download started.";
 }
+
+// ---------------------------------------------------------------------------
+// Loaded data info panel
+// ---------------------------------------------------------------------------
+function showLoadedInfo(status, totalTips) {
+  const section = document.getElementById("loaded-info-section");
+  const el = document.getElementById("loaded-info");
+  if (!status || !status.loaded) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "";
+  const lines = [];
+  const tipStr = totalTips != null ? ` <span class="loaded-label">(${totalTips} tips)</span>` : "";
+  lines.push(`<span class="loaded-label">Tree:</span> <span class="loaded-value">${status.nwk_name || "unknown"}</span>${tipStr}`);
+  if (status.has_fasta && status.aa_name) {
+    lines.push(`<span class="loaded-label">Alignment:</span> <span class="loaded-value">${status.aa_name}</span> <span class="loaded-label">(${status.num_seqs} seqs)</span>`);
+  } else {
+    lines.push(`<span class="loaded-label">Alignment:</span> <span class="loaded-none">none</span>`);
+  }
+  if (status.num_species > 0) {
+    lines.push(`<span class="loaded-label">Species:</span> <span class="loaded-value">${status.num_species} species</span>`);
+  } else {
+    lines.push(`<span class="loaded-label">Species:</span> <span class="loaded-none">none</span>`);
+  }
+  lines.push(`<span class="loaded-label">Folder:</span> <span class="loaded-value">${status.input_dir}</span>`);
+  el.innerHTML = lines.join("<br>");
+}
+
+document.getElementById("reset-btn").addEventListener("click", async () => {
+  await fetch("/api/reset", { method: "POST" });
+  // Reset client state
+  treeData = null;
+  fullTreeData = null;
+  speciesMap = {};
+  tipToSpecies = {};
+  speciesColors = {};
+  nameMatches = new Set();
+  motifMatches = new Set();
+  sharedNodes = new Set();
+  collapsedNodes = new Set();
+  nodeById = {};
+  tipLengths = {};
+  selectedNodeTips = [];
+  motifList = [];
+  selectedTip = null;
+  exportNodeId = null;
+  allTipNames = [];
+  hasFasta = false;
+  fastMode = false;
+  renderCache = null;
+  renderCacheKey = null;
+  scale = 1; tx = 20; ty = 20;
+  // Clear UI
+  group.innerHTML = "";
+  document.getElementById("loaded-info-section").style.display = "none";
+  document.getElementById("species-list").innerHTML = "";
+  document.getElementById("exclude-species-list").innerHTML = "";
+  document.getElementById("motif-list").innerHTML = "";
+  document.getElementById("name-result").textContent = "";
+  document.getElementById("name-matches-list").innerHTML = "";
+  document.getElementById("name-input").value = "";
+  document.getElementById("motif-result").textContent = "";
+  document.getElementById("shared-result").textContent = "";
+  document.getElementById("export-form").style.display = "none";
+  document.getElementById("newick-form").style.display = "none";
+  document.getElementById("subtree-bar").style.display = "none";
+  document.getElementById("sidebar-back-full-tree").style.display = "none";
+  document.getElementById("fast-mode-toggle").checked = false;
+  // Show setup dialog
+  showSetup();
+});
 
 // ---------------------------------------------------------------------------
 // Filesystem browser
@@ -1416,5 +2005,36 @@ function exportPNG() {
 document.getElementById("export-svg-btn").addEventListener("click", exportSVG);
 document.getElementById("export-png-btn").addEventListener("click", exportPNG);
 
-// Wire up export button and load tip datalist after DOM ready
+function exportNewick() {
+  if (exportNodeId == null) return;
+  const url = `/api/export-newick?node_id=${exportNodeId}`;
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `node${exportNodeId}.nwk`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  const el = document.getElementById("newick-result");
+  el.style.color = "#27ae60";
+  el.textContent = "Download started.";
+}
+
+async function copyNewick() {
+  if (exportNodeId == null) return;
+  const el = document.getElementById("newick-result");
+  try {
+    const resp = await fetch(`/api/export-newick?node_id=${exportNodeId}`);
+    const nwk = await resp.text();
+    await navigator.clipboard.writeText(nwk);
+    el.style.color = "#27ae60";
+    el.textContent = "Copied to clipboard!";
+  } catch (e) {
+    el.style.color = "#c0392b";
+    el.textContent = "Copy failed.";
+  }
+}
+
+// Wire up export buttons
 document.getElementById("export-btn").addEventListener("click", doExport);
+document.getElementById("export-newick-btn").addEventListener("click", exportNewick);
+document.getElementById("copy-newick-btn").addEventListener("click", copyNewick);

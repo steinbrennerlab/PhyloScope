@@ -18,7 +18,7 @@ A lightweight, local-first phylogenetic tree viewer with built-in sequence tools
 | Alignment export | Click-to-copy FASTA, subtree slicing, column ranges | No | No | Scriptable | No |
 | Click-to-copy | Tip FASTA + node aligned FASTA to clipboard | No | No | No | No |
 | Annotation | Species, bootstrap, motif highlights, sequence lengths | Very rich (heatmaps, domains, bars) | Moderate | Very rich | Basic (colors, fonts, line widths) |
-| Large trees (10k+) | Client-side SVG, auto-hides labels >1k tips | Optimized for large trees | Moderate | Good | Optimized (magnifier tool) |
+| Large trees (10k+) | Fast mode: batched SVG, auto-collapse, render cache | Optimized for large trees | Moderate | Good | Optimized (magnifier tool) |
 | Networks | No | No | No | Yes | Yes (rooted phylogenetic networks) |
 
 ## Installation
@@ -98,6 +98,10 @@ An example dataset is provided in `example_data/`.
 
 ## Features
 
+### Loaded Data Panel
+- Shows currently loaded tree file (with tip count), alignment file, species count, and input folder at the top of the sidebar
+- **Load different data** button resets all state and re-opens the setup dialog
+
 ### Tree Display
 - **Three layouts**: rectangular, circular (polar), unrooted (Felsenstein equal-angle)
 - **Branch lengths**: toggle phylogram vs cladogram
@@ -110,6 +114,13 @@ An example dataset is provided in `example_data/`.
 - **Triangle size**: adjustable via slider
 - **Subtree focus**: Ctrl+click an internal node to view its subtree in isolation; click "Back to full tree" to return
 - **Pan and zoom**: mouse drag to pan, scroll wheel to zoom
+
+### Fast Mode (Large Trees)
+- Auto-enables for trees with >1000 tips; manual toggle available
+- **Batched SVG rendering**: branches collapsed into single `<path>` elements per color, dots grouped — reduces DOM elements from ~5000-7000 to ~500-1500
+- **Simplified tip dots**: single color per tip (no pie charts), no labels or bootstrap values
+- **Render cache**: skips re-render when no relevant state has changed
+- **Auto-collapse**: for trees >2000 tips, automatically collapses clades to show ~50 visible groups; shift-click to expand clades of interest
 
 ### Node Selection
 - **Click** an internal node to select it — the node appears as a larger black dot
@@ -125,7 +136,11 @@ An example dataset is provided in `example_data/`.
 ### Name Search
 - Regex search against tip names (case-insensitive)
 - Matched tips highlighted in blue on the tree
-- Up to 10 matching names listed below the search box
+- Clickable results list — click a match to:
+  - Highlight it with a large red circle on the tree (visible even inside collapsed clades)
+  - Pan the view to center on the tip
+  - Copy its FASTA sequence to the clipboard
+- Warning shown when a tip exists in the tree but not in the alignment
 
 ### Motif Search
 - Search protein sequences by **regex** or **PROSITE** pattern
@@ -138,8 +153,8 @@ An example dataset is provided in `example_data/`.
 - Text labels use the first matching motif's color
 
 ### Tip Interaction
-- **Hover** over a tip to see: species, amino acid length, matching motif patterns, and "Click to copy FASTA"
-- **Click** a tip to copy its ungapped FASTA sequence to the clipboard
+- **Hover** over a tip to see: species, amino acid length, matching motif patterns, and "Click to copy FASTA" (or warning if sequence missing from alignment)
+- **Click** a tip to copy its ungapped FASTA sequence to the clipboard (shows warning if not found in alignment)
 
 ### Shared Nodes
 - Select species, then highlight all internal nodes containing all checked species
@@ -152,11 +167,17 @@ An example dataset is provided in `example_data/`.
 ### Alignment Export
 - **Click** an internal node to select it for export (also copies FASTA to clipboard)
 - Exports gapped FASTA for the subtree's sequences (in tree traversal order)
+- Warning shown when tips in the subtree are missing from the alignment
 - Options:
   - **Extra sequences**: add comma-separated tip names (validates they exist)
   - **Full alignment**: export all columns
   - **Alignment columns**: specify a 1-indexed column range
   - **Reference sequence positions**: specify residue positions in a reference sequence; automatically maps to alignment columns
+
+### Newick Export
+- **Click** an internal node to select it, then:
+  - **Download .nwk**: save the subtree as a Newick file
+  - **Copy to clipboard**: copy the Newick string directly
 
 ## API Endpoints
 
@@ -174,6 +195,8 @@ An example dataset is provided in `example_data/`.
 | `GET /api/node-tips?node_id=N` | List descendant tip names for a node |
 | `GET /api/tip-names` | All tip names (for autocomplete) |
 | `GET /api/export?node_id=N&...` | Download gapped FASTA for a subtree |
+| `GET /api/export-newick?node_id=N` | Download subtree as Newick string |
+| `POST /api/reset` | Reset server state to load new data |
 
 ### Export Parameters
 

@@ -57,6 +57,12 @@
 <div id="sidebar">
   <h2>PhyloScope</h2>
 
+  <div class="section" id="loaded-info-section" style="display:none;">
+    <h3>Loaded Data</h3>
+    <div id="loaded-info" class="loaded-info"></div>
+    <button id="reset-btn" class="btn" style="margin-top:4px;">Load different data</button>
+  </div>
+
   <div class="section">
     <h3>Layout</h3>
     <div class="row">
@@ -68,6 +74,7 @@
     <div><label><input type="checkbox" id="tip-labels-toggle" checked> Show tip labels</label></div>
     <div><label><input type="checkbox" id="bootstrap-toggle"> Show bootstraps</label></div>
     <div><label><input type="checkbox" id="length-toggle"> Show sequence lengths</label></div>
+    <div><label><input type="checkbox" id="fast-mode-toggle"> Fast mode (large trees)</label></div>
     <div><label><input type="checkbox" id="uniform-triangles-toggle"> Uniform collapsed triangles</label></div>
     <div class="row">
       <label>Triangle size: <input type="range" id="triangle-size" min="10" max="500" value="100"></label>
@@ -178,6 +185,16 @@
 
     <button id="export-btn" class="btn">Export FASTA</button>
     <div id="export-result"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Export Newick</h3>
+    <div id="newick-info" class="hint">Click a node to select subtree</div>
+    <div id="newick-form" style="display:none;">
+      <button id="export-newick-btn" class="btn">Download .nwk</button>
+      <button id="copy-newick-btn" class="btn">Copy to clipboard</button>
+      <div id="newick-result"></div>
     </div>
   </div>
 </div>

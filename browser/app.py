@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 # ---------------------------------------------------------------------------
@@ -26,6 +26,8 @@ state = {
     "tip_to_species": {},
     "num_seqs": 0,
     "num_species": 0,
+    "nwk_name": None,
+    "aa_name": None,
 }
 
 # ---------------------------------------------------------------------------
@@ -375,6 +377,8 @@ def load_data(input_dir_str, nwk_file=None, aa_file=None):
         "tip_to_species": tip_to_species,
         "num_seqs": len(protein_seqs) if has_fasta else 0,
         "num_species": len(species_to_tips),
+        "nwk_name": nwk_file.name,
+        "aa_name": aa_file.name if aa_file else None,
     })
 
     print(f"Loaded: {state['num_seqs']} sequences, {state['num_species']} species")
@@ -403,6 +407,24 @@ def collect_descendant_tips(node):
     for c in node["children"]:
         tips.extend(collect_descendant_tips(c))
     return tips
+
+
+def node_to_newick(node):
+    """Convert a tree node dict back to a Newick string."""
+    children = node.get("children", [])
+    if children:
+        child_strs = ",".join(node_to_newick(c) for c in children)
+        s = f"({child_strs})"
+        if node.get("support") is not None:
+            s += str(node["support"])
+        elif node.get("name"):
+            s += node["name"]
+    else:
+        s = node.get("name", "")
+    bl = node.get("branch_length")
+    if bl is not None and bl != 0:
+        s += f":{bl}"
+    return s
 
 
 def ref_pos_to_columns(ref_seq_gapped, ref_start, ref_end):
@@ -492,6 +514,8 @@ async def api_status():
             "input_dir": state["input_dir"],
             "num_seqs": state["num_seqs"],
             "num_species": state["num_species"],
+            "nwk_name": state["nwk_name"],
+            "aa_name": state["aa_name"],
         }
     return {"loaded": False}
 
@@ -536,6 +560,28 @@ async def api_load(request: Request):
         "num_seqs": state["num_seqs"],
         "num_species": state["num_species"],
     }
+
+
+@app.post("/api/reset")
+async def api_reset():
+    """Reset state so user can load a new dataset."""
+    state.update({
+        "loaded": False,
+        "has_fasta": False,
+        "input_dir": None,
+        "gene": None,
+        "tree_data": None,
+        "tree_json": None,
+        "protein_seqs": None,
+        "protein_seqs_ungapped": None,
+        "species_to_tips": {},
+        "tip_to_species": {},
+        "num_seqs": 0,
+        "num_species": 0,
+        "nwk_name": None,
+        "aa_name": None,
+    })
+    return {"ok": True}
 
 
 @app.get("/api/tree")
@@ -614,6 +660,19 @@ async def node_tips(node_id: int = Query(..., description="Node ID")):
         return {"error": "Node not found", "tips": []}
     tips = collect_descendant_tips(node)
     return {"tips": tips}
+
+
+@app.get("/api/export-newick")
+async def export_newick(node_id: int = Query(..., description="Node ID")):
+    """Return the subtree rooted at node_id as a Newick string."""
+    err = require_loaded()
+    if err:
+        return err
+    node = find_node_by_id(state["tree_data"], node_id)
+    if not node:
+        return JSONResponse(status_code=404, content={"error": "Node not found"})
+    nwk = node_to_newick(node) + ";"
+    return PlainTextResponse(content=nwk, media_type="text/plain")
 
 
 @app.get("/api/tip-lengths")
