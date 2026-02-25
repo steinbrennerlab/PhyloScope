@@ -17,8 +17,11 @@ let tipSpacing = 16;
 let layoutMode = "rectangular";  // "rectangular" | "circular" | "unrooted"
 let showTipLabels = true;
 let showBootstraps = false;
+let uniformTriangles = false;
+let triangleScale = 100;         // percentage slider for triangle size (10–200)
 let exportNodeId = null;         // currently selected node for export
 let allTipNames = [];            // cached for export validation
+let fullTreeData = null;         // stores the original tree when viewing a subtree
 
 // Pan / zoom state
 let scale = 1, tx = 20, ty = 20;
@@ -58,6 +61,36 @@ function countAllTips(node) {
   let n = 0;
   for (const c of node.ch) n += countAllTips(c);
   return n;
+}
+
+function deepCopyNode(node) {
+  const copy = { ...node };
+  if (node.ch) copy.ch = node.ch.map(deepCopyNode);
+  return copy;
+}
+
+function openSubtree(nodeId) {
+  if (fullTreeData === null) fullTreeData = treeData;
+  const subtreeCopy = deepCopyNode(nodeById[nodeId]);
+  treeData = subtreeCopy;
+  nodeById = {};
+  indexNodes(treeData);
+  collapsedNodes.clear();
+  scale = 1; tx = 20; ty = 20;
+  document.getElementById("subtree-bar").style.display = "";
+  document.getElementById("sidebar-back-full-tree").style.display = "";
+  renderTree();
+}
+
+function restoreFullTree() {
+  treeData = fullTreeData;
+  fullTreeData = null;
+  nodeById = {};
+  indexNodes(treeData);
+  scale = 1; tx = 20; ty = 20;
+  document.getElementById("subtree-bar").style.display = "none";
+  document.getElementById("sidebar-back-full-tree").style.display = "none";
+  renderTree();
 }
 
 function getNodeColor(node, checkedSpecies) {
@@ -153,6 +186,14 @@ function setupControls() {
     showBootstraps = e.target.checked;
     renderTree();
   });
+  document.getElementById("uniform-triangles-toggle").addEventListener("change", e => {
+    uniformTriangles = e.target.checked;
+    renderTree();
+  });
+  document.getElementById("triangle-size").addEventListener("input", e => {
+    triangleScale = +e.target.value;
+    renderTree();
+  });
 
   // Layout radio buttons
   document.querySelectorAll('input[name="layout"]').forEach(radio => {
@@ -190,6 +231,10 @@ function setupControls() {
   document.getElementById("exclude-none").addEventListener("click", () => {
     document.querySelectorAll("#exclude-species-list input").forEach(cb => cb.checked = false);
   });
+
+  // Subtree back buttons
+  document.getElementById("back-full-tree").addEventListener("click", restoreFullTree);
+  document.getElementById("sidebar-back-full-tree").addEventListener("click", restoreFullTree);
 
   // Pan/zoom
   svg.addEventListener("wheel", e => {
@@ -328,9 +373,11 @@ function renderRectangular(fragments, checkedSpecies) {
     const x = usePhylogram ? depth + bl * xScale : depth + 20;
 
     if (collapsedNodes.has(node.id) && node.ch) {
-      const y = leafIndex * tipSpacing;
-      leafIndex++;
       const tipCount = countAllTips(node);
+      const triH = (uniformTriangles ? 30 : Math.min(tipCount * 2, 40)) * triangleScale / 100;
+      const slotsNeeded = Math.max(1, Math.ceil(triH / tipSpacing));
+      const y = (leafIndex + slotsNeeded / 2) * tipSpacing;
+      leafIndex += slotsNeeded;
       return { ...node, x, parentX: depth, y, collapsed: true, tipCount };
     }
     if (!node.ch || node.ch.length === 0) {
@@ -352,10 +399,11 @@ function renderRectangular(fragments, checkedSpecies) {
     fragments.push(`<line x1="${px}" y1="${ny}" x2="${nx}" y2="${ny}" stroke="${color}" stroke-width="1"/>`);
 
     if (node.collapsed) {
-      const triH = Math.min(node.tipCount * 2, 40);
+      const triH = (uniformTriangles ? 30 : Math.min(node.tipCount * 2, 40)) * triangleScale / 100;
+      const triW = 30 * triangleScale / 100;
       fragments.push(
-        `<polygon points="${nx},${ny} ${nx + 30},${ny - triH / 2} ${nx + 30},${ny + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
-        `<text x="${nx + 34}" y="${ny + 3}" font-size="9" fill="#666">${node.tipCount} tips</text>`
+        `<polygon points="${nx},${ny} ${nx + triW},${ny - triH / 2} ${nx + triW},${ny + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+        `<text x="${nx + triW + 4}" y="${ny + 3}" font-size="9" fill="#666">${node.tipCount} tips</text>`
       );
       return;
     }
@@ -420,8 +468,8 @@ function renderCircular(fragments, checkedSpecies) {
 
     if (node.collapsed) {
       // Collapsed wedge
-      const wedgeR = node.r + 20;
-      const halfArc = Math.min(node.tipCount * 0.01, 0.3);
+      const wedgeR = node.r + 20 * triangleScale / 100;
+      const halfArc = (uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * triangleScale / 100;
       const [wx1, wy1] = toXY(wedgeR, node.angle - halfArc);
       const [wx2, wy2] = toXY(wedgeR, node.angle + halfArc);
       const large = halfArc * 2 > Math.PI ? 1 : 0;
@@ -507,8 +555,8 @@ function renderUnrooted(fragments, checkedSpecies) {
 
     if (node.collapsed) {
       // Draw wedge fan
-      const fanLen = 20;
-      const halfW = Math.min(node.tipCount * 0.01, 0.3);
+      const fanLen = 20 * triangleScale / 100;
+      const halfW = (uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * triangleScale / 100;
       const x1 = node.x + fanLen * Math.cos(node.angle - halfW);
       const y1 = node.y + fanLen * Math.sin(node.angle - halfW);
       const x2 = node.x + fanLen * Math.cos(node.angle + halfW);
@@ -622,6 +670,10 @@ function onTreeClick(e) {
     const nid = +nodeId;
     if (e.shiftKey) {
       openExportPanel(nid);
+      return;
+    }
+    if (e.ctrlKey) {
+      openSubtree(nid);
       return;
     }
     if (collapsedNodes.has(nid)) collapsedNodes.delete(nid);

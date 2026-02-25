@@ -50,9 +50,19 @@
     <div><label><input type="checkbox" id="phylogram-toggle" checked> Use branch lengths</label></div>
     <div><label><input type="checkbox" id="tip-labels-toggle" checked> Show tip labels</label></div>
     <div><label><input type="checkbox" id="bootstrap-toggle"> Show bootstraps</label></div>
+    <div><label><input type="checkbox" id="uniform-triangles-toggle"> Uniform collapsed triangles</label></div>
+    <div class="row">
+      <label>Triangle size: <input type="range" id="triangle-size" min="10" max="500" value="100"></label>
+    </div>
     <div class="row">
       <label>Tip spacing: <input type="range" id="tip-spacing" min="8" max="40" value="16"></label>
     </div>
+  </div>
+
+  <div class="section">
+    <h3>Subtree Focus</h3>
+    <p class="hint">Ctrl+click an internal node to view its subtree in isolation.</p>
+    <button id="sidebar-back-full-tree" class="btn" style="display:none;">Back to full tree</button>
   </div>
 
   <div class="section">
@@ -153,6 +163,10 @@
 </div>
 
 <datalist id="tip-datalist"></datalist>
+
+<div id="subtree-bar" style="display:none;">
+  Viewing subtree · <button id="back-full-tree" class="btn-sm">Back to full tree</button>
+</div>
 
 <div id="tree-container">
   <svg id="tree-svg">

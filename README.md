@@ -104,6 +104,8 @@ An example dataset is provided in `example_data/`.
 - **Bootstrap values**: toggle display on internal nodes
 - **Tip spacing**: adjustable via slider
 - **Collapse/expand**: click an internal node dot to collapse its subtree
+- **Uniform triangles**: toggle to make all collapsed triangles the same size regardless of tip count
+- **Subtree focus**: Ctrl+click an internal node to view its subtree in isolation; click "Back to full tree" to return
 - **Pan and zoom**: mouse drag to pan, scroll wheel to zoom
 
 ### Species Highlighting
