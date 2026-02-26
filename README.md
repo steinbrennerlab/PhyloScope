@@ -41,9 +41,12 @@ curl -Ls https://micro.mamba.pm/api/micromamba/osx-64/latest | tar -xvj -C ~/.lo
 # macOS (Apple Silicon)
 curl -Ls https://micro.mamba.pm/api/micromamba/osx-arm64/latest | tar -xvj -C ~/.local/bin --strip-components=1 bin/micromamba
 
-# Create the environment
+# Create a new environment
 micromamba create -f environment.yml -y
 micromamba activate tree-browser
+
+# Or update an existing environment
+micromamba install -f environment.yml -n tree-browser -y
 ```
 
 ### Option B: pip

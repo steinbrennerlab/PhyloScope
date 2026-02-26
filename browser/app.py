@@ -927,5 +927,16 @@ async def export_alignment(
 # Run
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    import threading
+    import webbrowser
+
     import uvicorn
+
+    def open_browser():
+        """Open the browser after a short delay to let the server start."""
+        import time
+        time.sleep(1)
+        webbrowser.open("http://localhost:8000")
+
+    threading.Thread(target=open_browser, daemon=True).start()
     uvicorn.run(app, host="0.0.0.0", port=8000)
