@@ -557,17 +557,10 @@ function searchName() {
 
 function selectNameTip(tipName) {
   selectedTip = tipName;
-  // Copy FASTA to clipboard if alignment loaded, or warn if missing
+  // Copy tip name to clipboard
   const resultEl = document.getElementById("name-result");
-  if (hasFasta) {
-    const tipSet = new Set(allTipNames);
-    if (!tipSet.has(tipName)) {
-      resultEl.innerHTML = `<span style="color:#c0392b">Sequence not found in alignment: ${tipName}</span>`;
-    } else {
-      resultEl.textContent = `${nameMatches.size} tips matched`;
-      copyTipFasta(tipName);
-    }
-  }
+  resultEl.textContent = `${nameMatches.size} tips matched`;
+  copyTipName(tipName);
   // Update active state in list
   document.querySelectorAll(".name-match-item").forEach(el => {
     el.classList.toggle("name-match-active", el.textContent === tipName);
@@ -1539,7 +1532,7 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
 function onTreeClick(e) {
   const el = e.target;
 
-  // Tip click — copy ungapped FASTA to clipboard (if alignment loaded)
+  // Tip click — copy tip name; Shift+click copies FASTA
   const tipName = el.dataset?.tip;
   if (tipName) {
     if (e.ctrlKey && e.shiftKey) {
@@ -1547,7 +1540,11 @@ function onTreeClick(e) {
       if (node) rerootAt(node.id);
       return;
     }
-    if (hasFasta) copyTipFasta(tipName);
+    if (e.shiftKey) {
+      if (hasFasta) copyTipFasta(tipName);
+      return;
+    }
+    copyTipName(tipName);
     return;
   }
 
@@ -1609,9 +1606,20 @@ async function copyTipFasta(tipName) {
     }
     const fasta = `>${data.name}\n${data.seq}`;
     await navigator.clipboard.writeText(fasta);
-    tooltip.textContent = "Copied to clipboard!";
+    tooltip.textContent = "FASTA copied to clipboard!";
   } catch (e) {
     tooltip.textContent = "Copy failed";
+  }
+}
+
+async function copyTipName(tipName) {
+  try {
+    await navigator.clipboard.writeText(tipName);
+    tooltip.textContent = "Name copied to clipboard!";
+    tooltip.style.display = "block";
+  } catch (e) {
+    tooltip.textContent = "Copy failed";
+    tooltip.style.display = "block";
   }
 }
 
@@ -1630,7 +1638,7 @@ function buildTipTooltip(tipName, species) {
       if (matching.length > 0) {
         lines.push(`Motifs: ${matching.map(m => m.pattern).join(", ")}`);
       }
-      lines.push("Click to copy FASTA");
+      lines.push("Click to copy name · Shift+click to copy FASTA");
     }
   }
   return lines.join("\n");

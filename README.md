@@ -162,7 +162,7 @@ An example dataset is provided in `example_data/`.
 - Clickable results list — click a match to:
   - Highlight it with a large red circle on the tree (visible even inside collapsed clades)
   - Pan the view to center on the tip
-  - Copy its FASTA sequence to the clipboard
+  - Copy its name to the clipboard
 - Warning shown when a tip exists in the tree but not in the alignment
 
 ### Motif Search
@@ -176,8 +176,9 @@ An example dataset is provided in `example_data/`.
 - Text labels use the first matching motif's color
 
 ### Tip Interaction
-- **Hover** over a tip to see: species, amino acid length, matching motif patterns, and "Click to copy FASTA" (or warning if sequence missing from alignment)
-- **Click** a tip to copy its ungapped FASTA sequence to the clipboard (shows warning if not found in alignment)
+- **Hover** over a tip to see: species, amino acid length, matching motif patterns, and click hints
+- **Click** a tip to copy its name to the clipboard
+- **Shift+click** a tip to copy its ungapped FASTA sequence to the clipboard
 
 ### Shared Nodes
 - Select species, then highlight all internal nodes containing all checked species

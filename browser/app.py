@@ -548,6 +548,11 @@ STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse(str(STATIC_DIR / "logo.png"), media_type="image/png")
+
+
 @app.get("/")
 async def index():
     return FileResponse(str(STATIC_DIR / "index.html"))
