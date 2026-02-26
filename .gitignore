@@ -24,3 +24,4 @@ Thumbs.db
 # 3. Specifically allow the folder you want to keep
 !example_data/
 !browser/
+!logo.png
