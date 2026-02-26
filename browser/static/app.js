@@ -656,8 +656,10 @@ function updateSpeciesCounts() {
 
 async function highlightSharedNodes() {
   const checked = [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species);
+  const listEl = document.getElementById("shared-nodes-list");
   if (checked.length === 0) {
     document.getElementById("shared-result").textContent = "Select at least one species";
+    listEl.innerHTML = "";
     return;
   }
   const excluded = [...document.querySelectorAll("#exclude-species-list input:checked")].map(cb => cb.dataset.excludeSpecies);
@@ -667,7 +669,42 @@ async function highlightSharedNodes() {
   const data = await resp.json();
   sharedNodes = new Set(data.highlighted_nodes || []);
   document.getElementById("shared-result").textContent = `${sharedNodes.size} nodes highlighted`;
+  // Build clickable list of shared nodes
+  listEl.innerHTML = "";
+  for (const nodeId of [...sharedNodes].sort((a, b) => a - b)) {
+    const node = nodeById[nodeId];
+    const tips = node ? countAllTips(node) : "?";
+    const sup = node && node.sup != null ? node.sup : "—";
+    const item = document.createElement("div");
+    item.className = "name-match-item";
+    item.dataset.nodeid = nodeId;
+    item.textContent = `Node #${nodeId} — ${tips} tips (support: ${sup})`;
+    item.addEventListener("click", () => selectSharedNode(nodeId));
+    listEl.appendChild(item);
+  }
   renderTree();
+}
+
+function selectSharedNode(nodeId) {
+  openExportPanel(nodeId);
+  // Update active state in shared nodes list
+  document.querySelectorAll("#shared-nodes-list .name-match-item").forEach(el => {
+    el.classList.toggle("name-match-active", parseInt(el.dataset.nodeid) === nodeId);
+  });
+  invalidateRenderCache();
+  renderTree();
+  // Pan to the node after a short delay to let render complete
+  requestAnimationFrame(() => {
+    const circle = group.querySelector(`circle[data-nodeid="${nodeId}"]`);
+    if (circle) {
+      const cx = parseFloat(circle.getAttribute("cx"));
+      const cy = parseFloat(circle.getAttribute("cy"));
+      const rect = svg.getBoundingClientRect();
+      tx = rect.width / 2 - cx * scale;
+      ty = rect.height / 2 - cy * scale;
+      applyTransform();
+    }
+  });
 }
 
 // ===========================================================================
@@ -1713,6 +1750,7 @@ document.getElementById("reset-btn").addEventListener("click", async () => {
   document.getElementById("name-input").value = "";
   document.getElementById("motif-result").textContent = "";
   document.getElementById("shared-result").textContent = "";
+  document.getElementById("shared-nodes-list").innerHTML = "";
   document.getElementById("export-form").style.display = "none";
   document.getElementById("newick-form").style.display = "none";
   document.getElementById("subtree-bar").style.display = "none";
