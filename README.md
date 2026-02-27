@@ -6,6 +6,8 @@
 
 A lightweight, local-first phylogenetic tree viewer with built-in sequence tools. Built with FastAPI (Python) and vanilla JS/SVG.
 
+The frontend is organized as small ES modules: shared state, tree utilities, rendering, and UI actions are split into focused files under `browser/static/js/`.
+
 ![PhyloScope screenshot](screenshot.png)
 
 ## How it compares
@@ -243,6 +245,17 @@ An example dataset is provided in `example_data/`.
 | `POST /api/reroot` | Re-root tree at a node (`{"node_id": N}`) |
 | `POST /api/reset` | Reset server state to load new data |
 
+## Verification
+
+Run the lightweight backend smoke test after refactors:
+
+```bash
+cd browser
+python verify_refactor.py
+```
+
+The script builds a tiny temporary fixture, loads it through the backend helpers, and verifies core flows such as load, species mapping, motif search, pairwise identity, subtree export, and reset.
+
 ### Export Parameters
 
 | Parameter | Description |
@@ -261,12 +274,18 @@ environment.yml       # Conda/micromamba environment spec
 browser/
   app.py              # FastAPI backend
   run.sh              # Launch script
+  verify_refactor.py  # Lightweight backend smoke test
   static/
     index.html        # Single-page app
-    app.js            # All client-side logic
+    app.js            # Frontend bootstrap
     style.css         # Styling
     logo.png          # Cropped logo for sidebar
     jspdf.umd.min.js  # jsPDF library (bundled)
     svg2pdf.umd.min.js # svg2pdf.js library (bundled)
+    js/
+      actions.js      # UI actions, setup flow, and event wiring
+      renderer.js     # Tree layout/rendering and export SVG helpers
+      state.js        # Shared frontend state and DOM references
+      tree-utils.js   # Tree traversal, indexing, and distance helpers
 example_data/         # Example tree, alignment, and species data
 ```
