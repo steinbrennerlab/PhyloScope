@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 # ---------------------------------------------------------------------------
 # Application state (populated by load_data)
 # ---------------------------------------------------------------------------
-state = {
+EMPTY_STATE = {
     "loaded": False,
     "has_fasta": False,
     "input_dir": None,
@@ -29,6 +29,21 @@ state = {
     "nwk_name": None,
     "aa_name": None,
 }
+state = EMPTY_STATE.copy()
+
+
+def loaded_status_payload():
+    """Return the common status payload for a loaded dataset."""
+    return {
+        "loaded": True,
+        "has_fasta": state["has_fasta"],
+        "gene": state["gene"],
+        "input_dir": state["input_dir"],
+        "num_seqs": state["num_seqs"],
+        "num_species": state["num_species"],
+        "nwk_name": state["nwk_name"],
+        "aa_name": state["aa_name"],
+    }
 
 # ---------------------------------------------------------------------------
 # Newick parser (pure Python, no dependencies)
@@ -595,16 +610,7 @@ async def api_browse(path: Optional[str] = Query(None)):
 @app.get("/api/status")
 async def api_status():
     if state["loaded"]:
-        return {
-            "loaded": True,
-            "has_fasta": state["has_fasta"],
-            "gene": state["gene"],
-            "input_dir": state["input_dir"],
-            "num_seqs": state["num_seqs"],
-            "num_species": state["num_species"],
-            "nwk_name": state["nwk_name"],
-            "aa_name": state["aa_name"],
-        }
+        return loaded_status_payload()
     return {"loaded": False}
 
 
@@ -640,35 +646,13 @@ async def api_load(request: Request):
     if not success:
         return JSONResponse(status_code=400, content={"error": error})
 
-    return {
-        "loaded": True,
-        "has_fasta": state["has_fasta"],
-        "gene": state["gene"],
-        "input_dir": state["input_dir"],
-        "num_seqs": state["num_seqs"],
-        "num_species": state["num_species"],
-    }
+    return loaded_status_payload()
 
 
 @app.post("/api/reset")
 async def api_reset():
     """Reset state so user can load a new dataset."""
-    state.update({
-        "loaded": False,
-        "has_fasta": False,
-        "input_dir": None,
-        "gene": None,
-        "tree_data": None,
-        "tree_json": None,
-        "protein_seqs": None,
-        "protein_seqs_ungapped": None,
-        "species_to_tips": {},
-        "tip_to_species": {},
-        "num_seqs": 0,
-        "num_species": 0,
-        "nwk_name": None,
-        "aa_name": None,
-    })
+    state.update(EMPTY_STATE)
     return {"ok": True}
 
 

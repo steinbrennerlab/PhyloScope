@@ -1,0 +1,705 @@
+import { dom, INLINE_STYLES, state } from "./state.js";
+import {
+  collectAllTipNames,
+  countAllTips,
+  countLeaves,
+  getMotifColors,
+  getNodeColor,
+  isNodeHidden,
+} from "./tree-utils.js";
+
+let treeClickHandler = () => {};
+let treeHoverHandler = () => {};
+
+export function configureRenderer({ onTreeClick, onTreeHover }) {
+  treeClickHandler = onTreeClick;
+  treeHoverHandler = onTreeHover;
+}
+
+export function invalidateRenderCache() {
+  state.renderCache = null;
+  state.renderCacheKey = null;
+}
+
+export function applyTransform() {
+  dom.group.setAttribute("transform", `translate(${state.tx},${state.ty}) scale(${state.scale})`);
+}
+
+function drawMotifPie(fragments, cx, cy, r, colors) {
+  if (colors.length === 1) {
+    fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${colors[0]}" class="tip-dot motif-match"/>`);
+    return;
+  }
+  const n = colors.length;
+  for (let i = 0; i < n; i++) {
+    const a0 = (2 * Math.PI * i / n) - Math.PI / 2;
+    const a1 = (2 * Math.PI * (i + 1) / n) - Math.PI / 2;
+    const x0 = cx + r * Math.cos(a0);
+    const y0 = cy + r * Math.sin(a0);
+    const x1 = cx + r * Math.cos(a1);
+    const y1 = cy + r * Math.sin(a1);
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+    fragments.push(
+      `<path d="M${cx},${cy} L${x0},${y0} A${r},${r} 0 ${large},1 ${x1},${y1} Z" fill="${colors[i]}" class="tip-dot motif-match"/>`
+    );
+  }
+}
+
+function getRenderCacheKey(checkedSpecies) {
+  return [
+    state.layoutMode,
+    state.usePhylogram,
+    state.tipSpacing,
+    state.triangleScale,
+    state.uniformTriangles,
+    [...state.collapsedNodes].sort().join(","),
+    [...checkedSpecies].sort().join(","),
+    [...state.nameMatches].sort().join(","),
+    [...state.motifMatches].sort().join(","),
+    [...state.sharedNodes].sort().join(","),
+    state.exportNodeId,
+    state.selectedTip,
+    state.fastMode,
+    [...state.hiddenTips].sort().join(","),
+    JSON.stringify(state.nodeLabels),
+  ].join("|");
+}
+
+function attachTreeEvents() {
+  dom.group.onclick = treeClickHandler;
+  dom.group.onmouseover = treeHoverHandler;
+  dom.group.onmouseout = () => {
+    dom.tooltip.style.display = "none";
+  };
+}
+
+export function renderTree() {
+  if (!state.treeData) return;
+
+  const checkedSpecies = new Set(
+    [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species)
+  );
+
+  if (state.fastMode) {
+    const key = getRenderCacheKey(checkedSpecies);
+    if (state.renderCache && state.renderCacheKey === key) {
+      dom.group.innerHTML = state.renderCache;
+      attachTreeEvents();
+      applyTransform();
+      return;
+    }
+  }
+
+  const fragments = [];
+  if (state.layoutMode === "rectangular") {
+    renderRectangular(fragments, checkedSpecies);
+  } else if (state.layoutMode === "circular") {
+    renderCircular(fragments, checkedSpecies);
+  } else {
+    renderUnrooted(fragments, checkedSpecies);
+  }
+
+  const html = fragments.join("\n");
+  if (state.fastMode) {
+    state.renderCache = html;
+    state.renderCacheKey = getRenderCacheKey(checkedSpecies);
+  }
+
+  dom.group.innerHTML = html;
+  attachTreeEvents();
+
+  if (state.layoutMode !== "rectangular" && state.scale === 1 && state.tx === 20 && state.ty === 20) {
+    const rect = dom.svg.getBoundingClientRect();
+    state.tx = rect.width / 2;
+    state.ty = rect.height / 2;
+  }
+  applyTransform();
+}
+
+function renderRectangular(fragments, checkedSpecies) {
+  let leafIndex = 0;
+  const xScale = state.usePhylogram ? 800 : 0;
+
+  function layout(node, depth) {
+    if (isNodeHidden(node)) return null;
+    const bl = node.bl || 0;
+    const x = state.usePhylogram ? depth + bl * xScale : depth + 20;
+
+    if (state.collapsedNodes.has(node.id) && node.ch) {
+      const tipCount = countAllTips(node);
+      const triH = (state.uniformTriangles ? 30 : Math.min(tipCount * 2, 40)) * state.triangleScale / 100;
+      const slotsNeeded = Math.max(1, Math.ceil(triH / state.tipSpacing));
+      const y = (leafIndex + slotsNeeded / 2) * state.tipSpacing;
+      leafIndex += slotsNeeded;
+      return { ...node, x, parentX: depth, y, collapsed: true, tipCount };
+    }
+    if (!node.ch || node.ch.length === 0) {
+      if (state.hiddenTips.has(node.name)) return null;
+      const y = leafIndex * state.tipSpacing;
+      leafIndex++;
+      return { ...node, x, parentX: depth, y };
+    }
+    const children = node.ch.map(child => layout(child, x)).filter(Boolean);
+    if (children.length === 0) return null;
+    const y = (children[0].y + children[children.length - 1].y) / 2;
+    return { ...node, x, parentX: depth, y, layoutChildren: children };
+  }
+
+  const root = layout(state.treeData, 0);
+  if (!root) return;
+  if (state.fastMode) {
+    drawFastRectangular(fragments, root, checkedSpecies);
+    return;
+  }
+
+  function draw(node) {
+    const px = node.parentX;
+    const nx = node.x;
+    const ny = node.y;
+    const color = getNodeColor(node, checkedSpecies);
+
+    fragments.push(`<line x1="${px}" y1="${ny}" x2="${nx}" y2="${ny}" stroke="${color}" stroke-width="1"/>`);
+
+    if (node.collapsed) {
+      const triH = (state.uniformTriangles ? 30 : Math.min(node.tipCount * 2, 40)) * state.triangleScale / 100;
+      const triW = 30 * state.triangleScale / 100;
+      const triLabel = state.nodeLabels[node.id] ? `${state.nodeLabels[node.id]} (${node.tipCount})` : `${node.tipCount} tips`;
+      fragments.push(
+        `<polygon points="${nx},${ny} ${nx + triW},${ny - triH / 2} ${nx + triW},${ny + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+        `<text x="${nx + triW + 4}" y="${ny + 3}" font-size="9" fill="#666">${triLabel}</text>`
+      );
+      if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
+        fragments.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+      }
+      return;
+    }
+    if (node.layoutChildren) {
+      const firstY = node.layoutChildren[0].y;
+      const lastY = node.layoutChildren[node.layoutChildren.length - 1].y;
+      fragments.push(`<line x1="${nx}" y1="${firstY}" x2="${nx}" y2="${lastY}" stroke="#999" stroke-width="1"/>`);
+      drawNodeDot(fragments, nx, ny, node);
+      node.layoutChildren.forEach(draw);
+    } else {
+      drawTipDot(fragments, nx, ny, node, checkedSpecies);
+      if (state.showTipLabels) drawTipLabel(fragments, nx + 4, ny + 3, 0, node, checkedSpecies);
+    }
+  }
+
+  draw(root);
+}
+
+function renderCircular(fragments, checkedSpecies) {
+  const totalLeaves = countLeaves(state.treeData);
+  const rScale = state.usePhylogram ? 300 : 0;
+  const rStep = state.usePhylogram ? 0 : 15;
+  let leafIndex = 0;
+
+  function layout(node, depth) {
+    if (isNodeHidden(node)) return null;
+    const bl = node.bl || 0;
+    const r = state.usePhylogram ? depth + bl * rScale : depth + rStep;
+
+    if (state.collapsedNodes.has(node.id) && node.ch) {
+      const angle = (leafIndex / totalLeaves) * 2 * Math.PI;
+      leafIndex++;
+      const tipCount = countAllTips(node);
+      return { ...node, r, parentR: depth, angle, collapsed: true, tipCount };
+    }
+    if (!node.ch || node.ch.length === 0) {
+      if (state.hiddenTips.has(node.name)) return null;
+      const angle = (leafIndex / totalLeaves) * 2 * Math.PI;
+      leafIndex++;
+      return { ...node, r, parentR: depth, angle };
+    }
+    const children = node.ch.map(child => layout(child, r)).filter(Boolean);
+    if (children.length === 0) return null;
+    const angle = (children[0].angle + children[children.length - 1].angle) / 2;
+    return { ...node, r, parentR: depth, angle, layoutChildren: children };
+  }
+
+  const root = layout(state.treeData, 0);
+  if (!root) return;
+
+  function toXY(r, angle) {
+    return [r * Math.cos(angle), r * Math.sin(angle)];
+  }
+
+  if (state.fastMode) {
+    drawFastCircular(fragments, root, checkedSpecies, toXY);
+    return;
+  }
+
+  function draw(node) {
+    const [nx, ny] = toXY(node.r, node.angle);
+    const [px, py] = toXY(node.parentR, node.angle);
+    const color = getNodeColor(node, checkedSpecies);
+
+    fragments.push(`<line x1="${px}" y1="${py}" x2="${nx}" y2="${ny}" stroke="${color}" stroke-width="1"/>`);
+
+    if (node.collapsed) {
+      const wedgeR = node.r + 20 * state.triangleScale / 100;
+      const halfArc = (state.uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * state.triangleScale / 100;
+      const [wx1, wy1] = toXY(wedgeR, node.angle - halfArc);
+      const [wx2, wy2] = toXY(wedgeR, node.angle + halfArc);
+      const large = halfArc * 2 > Math.PI ? 1 : 0;
+      fragments.push(
+        `<path d="M${nx},${ny} L${wx1},${wy1} A${wedgeR},${wedgeR} 0 ${large},1 ${wx2},${wy2} Z" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+        `<text x="${(wx1 + wx2) / 2 + 4}" y="${(wy1 + wy2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
+      );
+      if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
+        fragments.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+      }
+      return;
+    }
+    if (node.layoutChildren) {
+      const a1 = node.layoutChildren[0].angle;
+      const a2 = node.layoutChildren[node.layoutChildren.length - 1].angle;
+      const [ax1, ay1] = toXY(node.r, a1);
+      const [ax2, ay2] = toXY(node.r, a2);
+      const sweep = a2 - a1;
+      const large = sweep > Math.PI ? 1 : 0;
+      fragments.push(`<path d="M${ax1},${ay1} A${node.r},${node.r} 0 ${large},1 ${ax2},${ay2}" fill="none" stroke="#999" stroke-width="1"/>`);
+      drawNodeDot(fragments, nx, ny, node);
+      node.layoutChildren.forEach(draw);
+    } else {
+      const deg = node.angle * 180 / Math.PI;
+      const flip = (deg > 90 && deg < 270) || (deg < -90 && deg > -270);
+      const textAngle = flip ? deg + 180 : deg;
+      const anchor = flip ? "end" : "start";
+      const lx = nx + (flip ? -4 : 4) * Math.cos(node.angle);
+      const ly = ny + (flip ? -4 : 4) * Math.sin(node.angle);
+      drawTipDot(fragments, nx, ny, node, checkedSpecies);
+      if (state.showTipLabels) drawTipLabelRadial(fragments, lx, ly, textAngle, anchor, node, checkedSpecies);
+    }
+  }
+
+  draw(root);
+}
+
+function renderUnrooted(fragments, checkedSpecies) {
+  const blScale = state.usePhylogram ? 300 : 0;
+  const blStep = state.usePhylogram ? 0 : 20;
+
+  function layout(node, px, py, startAngle, wedge) {
+    if (isNodeHidden(node)) return null;
+    const bl = node.bl || 0;
+    const len = state.usePhylogram ? bl * blScale : blStep;
+    const midAngle = startAngle + wedge / 2;
+    const nx = px + len * Math.cos(midAngle);
+    const ny = py + len * Math.sin(midAngle);
+
+    if (state.collapsedNodes.has(node.id) && node.ch) {
+      const tipCount = countAllTips(node);
+      return { ...node, x: nx, y: ny, parentX: px, parentY: py, angle: midAngle, collapsed: true, tipCount };
+    }
+    if (!node.ch || node.ch.length === 0) {
+      if (state.hiddenTips.has(node.name)) return null;
+      return { ...node, x: nx, y: ny, parentX: px, parentY: py, angle: midAngle };
+    }
+
+    const childLeafCounts = node.ch.map(child => countLeaves(child));
+    const totalChildLeaves = childLeafCounts.reduce((sum, count) => sum + count, 0);
+    if (totalChildLeaves === 0) return null;
+    let curAngle = startAngle;
+    const children = [];
+    node.ch.forEach((child, index) => {
+      if (childLeafCounts[index] === 0) return;
+      const childWedge = childLeafCounts[index] / totalChildLeaves * wedge;
+      const result = layout(child, nx, ny, curAngle, childWedge);
+      curAngle += childWedge;
+      if (result) children.push(result);
+    });
+    if (children.length === 0) return null;
+
+    return { ...node, x: nx, y: ny, parentX: px, parentY: py, angle: midAngle, layoutChildren: children };
+  }
+
+  const root = layout(state.treeData, 0, 0, 0, 2 * Math.PI);
+  if (!root) return;
+  if (state.fastMode) {
+    drawFastUnrooted(fragments, root, checkedSpecies);
+    return;
+  }
+
+  function draw(node) {
+    const color = getNodeColor(node, checkedSpecies);
+    fragments.push(`<line x1="${node.parentX}" y1="${node.parentY}" x2="${node.x}" y2="${node.y}" stroke="${color}" stroke-width="1"/>`);
+
+    if (node.collapsed) {
+      const fanLen = 20 * state.triangleScale / 100;
+      const halfW = (state.uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * state.triangleScale / 100;
+      const x1 = node.x + fanLen * Math.cos(node.angle - halfW);
+      const y1 = node.y + fanLen * Math.sin(node.angle - halfW);
+      const x2 = node.x + fanLen * Math.cos(node.angle + halfW);
+      const y2 = node.y + fanLen * Math.sin(node.angle + halfW);
+      fragments.push(
+        `<polygon points="${node.x},${node.y} ${x1},${y1} ${x2},${y2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+        `<text x="${(x1 + x2) / 2 + 2}" y="${(y1 + y2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
+      );
+      if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
+        fragments.push(`<circle cx="${node.x}" cy="${node.y}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+      }
+      return;
+    }
+    if (node.layoutChildren) {
+      drawNodeDot(fragments, node.x, node.y, node);
+      node.layoutChildren.forEach(draw);
+    } else {
+      const deg = node.angle * 180 / Math.PI;
+      const flip = (deg > 90 && deg < 270) || (deg < -90 && deg > -270);
+      const textAngle = flip ? deg + 180 : deg;
+      const anchor = flip ? "end" : "start";
+      const lx = node.x + 4 * Math.cos(node.angle);
+      const ly = node.y + 4 * Math.sin(node.angle);
+      drawTipDot(fragments, node.x, node.y, node, checkedSpecies);
+      if (state.showTipLabels) drawTipLabelRadial(fragments, lx, ly, textAngle, anchor, node, checkedSpecies);
+    }
+  }
+
+  draw(root);
+}
+
+function drawNodeDot(fragments, cx, cy, node) {
+  const isSelected = node.id === state.exportNodeId;
+  const isShared = state.sharedNodes.has(node.id);
+  const r = isSelected ? 6 : isShared ? 5 : 3;
+  const fill = isSelected ? "#000" : isShared ? "#ff6600" : "#999";
+  const cls = isSelected ? "node-dot selected-node" : isShared ? "node-dot shared-node" : "node-dot";
+  if (isSelected) {
+    fragments.push(`<circle cx="${cx}" cy="${cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
+  }
+  fragments.push(
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" class="${cls}" data-nodeid="${node.id}" ${node.sup != null ? `data-support="${node.sup}"` : ""}/>`
+  );
+  if (state.showBootstraps && node.sup != null) {
+    fragments.push(`<text x="${cx + 6}" y="${cy - 5}" class="bootstrap-label">${node.sup}</text>`);
+  }
+  if (state.nodeLabels[node.id]) {
+    fragments.push(`<text x="${cx + 8}" y="${cy + 4}" class="node-label">${state.nodeLabels[node.id]}</text>`);
+  }
+}
+
+function drawTipDot(fragments, cx, cy, node, checkedSpecies) {
+  const isMotif = state.motifMatches.has(node.name);
+  const isName = state.nameMatches.has(node.name);
+  const spColor = getNodeColor(node, checkedSpecies);
+  const r = isMotif || isName || spColor !== "#333" ? 3 : 2;
+  if (node.name === state.selectedTip) {
+    fragments.push(`<circle cx="${cx}" cy="${cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+  }
+  if (isMotif) {
+    const colors = getMotifColors(node.name);
+    if (colors.length > 0) {
+      drawMotifPie(fragments, cx, cy, r, colors);
+      return;
+    }
+  }
+  const color = isName ? "#2563eb" : spColor;
+  fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" class="tip-dot" data-tip="${node.name}" data-species="${node.sp || ""}"/>`);
+}
+
+function drawTipLabel(fragments, x, y, rotation, node, checkedSpecies) {
+  const isMotif = state.motifMatches.has(node.name);
+  const isName = state.nameMatches.has(node.name);
+  const highlight = isMotif || isName;
+  const motifColors = isMotif ? getMotifColors(node.name) : [];
+  const color = isMotif && motifColors.length > 0 ? motifColors[0] : isName ? "#2563eb" : getNodeColor(node, checkedSpecies);
+  const bold = highlight ? ' font-weight="bold"' : "";
+  const transform = rotation ? ` transform="rotate(${rotation},${x},${y})"` : "";
+  let label = node.name;
+  if (state.showLengths && state.tipLengths[node.name] != null) label += ` (${state.tipLengths[node.name]} aa)`;
+  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}"${bold}${transform} data-tip="${node.name}" data-species="${node.sp || ""}">${label}</text>`);
+  if (isMotif && motifColors.length > 0) {
+    drawMotifPie(fragments, x - 4, y - 3, 3, motifColors);
+  }
+  if (isName) {
+    fragments.push(`<circle cx="${x - 4}" cy="${y - 3}" r="3" fill="#2563eb" stroke="#1d4ed8" stroke-width="1"/>`);
+  }
+}
+
+function drawTipLabelRadial(fragments, x, y, angleDeg, anchor, node, checkedSpecies) {
+  const isMotif = state.motifMatches.has(node.name);
+  const isName = state.nameMatches.has(node.name);
+  const highlight = isMotif || isName;
+  const motifColors = isMotif ? getMotifColors(node.name) : [];
+  const color = isMotif && motifColors.length > 0 ? motifColors[0] : isName ? "#2563eb" : getNodeColor(node, checkedSpecies);
+  const bold = highlight ? ' font-weight="bold"' : "";
+  let label = node.name;
+  if (state.showLengths && state.tipLengths[node.name] != null) label += ` (${state.tipLengths[node.name]} aa)`;
+  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}"${bold} text-anchor="${anchor}" transform="rotate(${angleDeg},${x},${y})" data-tip="${node.name}" data-species="${node.sp || ""}">${label}</text>`);
+  if (isMotif && motifColors.length > 0) {
+    const rad = angleDeg * Math.PI / 180;
+    drawMotifPie(fragments, x - 6 * Math.cos(rad), y - 6 * Math.sin(rad), 3, motifColors);
+  }
+  if (isName) {
+    const rad = angleDeg * Math.PI / 180;
+    fragments.push(`<circle cx="${x - 6 * Math.cos(rad)}" cy="${y - 6 * Math.sin(rad)}" r="3" fill="#2563eb" stroke="#1d4ed8" stroke-width="1"/>`);
+  }
+}
+
+function drawFastRectangular(fragments, root, checkedSpecies) {
+  const branchPaths = [];
+  const vlinePaths = [];
+  const dotData = [];
+  const triangles = [];
+
+  function collect(node) {
+    const color = getNodeColor(node, checkedSpecies);
+    branchPaths.push({ x1: node.parentX, y1: node.y, x2: node.x, y2: node.y, color });
+
+    if (node.collapsed) {
+      const triH = (state.uniformTriangles ? 30 : Math.min(node.tipCount * 2, 40)) * state.triangleScale / 100;
+      const triW = 30 * state.triangleScale / 100;
+      triangles.push(
+        `<polygon points="${node.x},${node.y} ${node.x + triW},${node.y - triH / 2} ${node.x + triW},${node.y + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+        `<text x="${node.x + triW + 4}" y="${node.y + 3}" font-size="9" fill="#666">${node.tipCount} tips</text>`
+      );
+      if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
+        triangles.push(`<circle cx="${node.x}" cy="${node.y}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+      }
+      return;
+    }
+    if (node.layoutChildren) {
+      vlinePaths.push({ x: node.x, y1: node.layoutChildren[0].y, y2: node.layoutChildren[node.layoutChildren.length - 1].y });
+      const isSelected = node.id === state.exportNodeId;
+      const isShared = state.sharedNodes.has(node.id);
+      dotData.push({
+        cx: node.x,
+        cy: node.y,
+        r: isSelected ? 6 : isShared ? 5 : 3,
+        fill: isSelected ? "#000" : isShared ? "#ff6600" : "#999",
+        nodeId: node.id,
+        sup: node.sup,
+        isTip: false,
+      });
+      node.layoutChildren.forEach(collect);
+    } else {
+      const isMotif = state.motifMatches.has(node.name);
+      const isName = state.nameMatches.has(node.name);
+      const spColor = getNodeColor(node, checkedSpecies);
+      let fill = "#333";
+      if (isMotif) {
+        const colors = getMotifColors(node.name);
+        fill = colors.length > 0 ? colors[0] : "#e22";
+      } else if (isName) {
+        fill = "#2563eb";
+      } else {
+        fill = spColor;
+      }
+      const r = isMotif || isName || spColor !== "#333" ? 3 : 2;
+      dotData.push({ cx: node.x, cy: node.y, r, fill, isTip: true, tipName: node.name, species: node.sp || "" });
+    }
+  }
+
+  collect(root);
+  emitFastBranches(fragments, branchPaths);
+  if (vlinePaths.length > 0) {
+    fragments.push(`<path d="${vlinePaths.map(v => `M${v.x},${v.y1}L${v.x},${v.y2}`).join("")}" stroke="#999" stroke-width="1" fill="none"/>`);
+  }
+  emitFastTrianglesAndDots(fragments, triangles, dotData);
+}
+
+function drawFastCircular(fragments, root, checkedSpecies, toXY) {
+  const branchPaths = [];
+  const arcPaths = [];
+  const dotData = [];
+  const triangles = [];
+
+  function collect(node) {
+    const [nx, ny] = toXY(node.r, node.angle);
+    const [px, py] = toXY(node.parentR, node.angle);
+    const color = getNodeColor(node, checkedSpecies);
+    branchPaths.push({ x1: px, y1: py, x2: nx, y2: ny, color });
+
+    if (node.collapsed) {
+      const wedgeR = node.r + 20 * state.triangleScale / 100;
+      const halfArc = (state.uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * state.triangleScale / 100;
+      const [wx1, wy1] = toXY(wedgeR, node.angle - halfArc);
+      const [wx2, wy2] = toXY(wedgeR, node.angle + halfArc);
+      const large = halfArc * 2 > Math.PI ? 1 : 0;
+      triangles.push(
+        `<path d="M${nx},${ny} L${wx1},${wy1} A${wedgeR},${wedgeR} 0 ${large},1 ${wx2},${wy2} Z" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+        `<text x="${(wx1 + wx2) / 2 + 4}" y="${(wy1 + wy2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
+      );
+      if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
+        triangles.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+      }
+      return;
+    }
+    if (node.layoutChildren) {
+      const a1 = node.layoutChildren[0].angle;
+      const a2 = node.layoutChildren[node.layoutChildren.length - 1].angle;
+      const [ax1, ay1] = toXY(node.r, a1);
+      const [ax2, ay2] = toXY(node.r, a2);
+      const large = a2 - a1 > Math.PI ? 1 : 0;
+      arcPaths.push(`M${ax1},${ay1} A${node.r},${node.r} 0 ${large},1 ${ax2},${ay2}`);
+
+      const isSelected = node.id === state.exportNodeId;
+      const isShared = state.sharedNodes.has(node.id);
+      dotData.push({
+        cx: nx,
+        cy: ny,
+        r: isSelected ? 6 : isShared ? 5 : 3,
+        fill: isSelected ? "#000" : isShared ? "#ff6600" : "#999",
+        nodeId: node.id,
+        sup: node.sup,
+        isTip: false,
+      });
+      node.layoutChildren.forEach(collect);
+    } else {
+      const isMotif = state.motifMatches.has(node.name);
+      const isName = state.nameMatches.has(node.name);
+      const spColor = getNodeColor(node, checkedSpecies);
+      let fill = "#333";
+      if (isMotif) {
+        const colors = getMotifColors(node.name);
+        fill = colors.length > 0 ? colors[0] : "#e22";
+      } else if (isName) {
+        fill = "#2563eb";
+      } else {
+        fill = spColor;
+      }
+      const r = isMotif || isName || spColor !== "#333" ? 3 : 2;
+      dotData.push({ cx: nx, cy: ny, r, fill, isTip: true, tipName: node.name, species: node.sp || "" });
+    }
+  }
+
+  collect(root);
+  emitFastBranches(fragments, branchPaths);
+  if (arcPaths.length > 0) {
+    fragments.push(`<path d="${arcPaths.join("")}" stroke="#999" stroke-width="1" fill="none"/>`);
+  }
+  emitFastTrianglesAndDots(fragments, triangles, dotData);
+}
+
+function drawFastUnrooted(fragments, root, checkedSpecies) {
+  const branchPaths = [];
+  const dotData = [];
+  const triangles = [];
+
+  function collect(node) {
+    const color = getNodeColor(node, checkedSpecies);
+    branchPaths.push({ x1: node.parentX, y1: node.parentY, x2: node.x, y2: node.y, color });
+
+    if (node.collapsed) {
+      const fanLen = 20 * state.triangleScale / 100;
+      const halfW = (state.uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * state.triangleScale / 100;
+      const x1 = node.x + fanLen * Math.cos(node.angle - halfW);
+      const y1 = node.y + fanLen * Math.sin(node.angle - halfW);
+      const x2 = node.x + fanLen * Math.cos(node.angle + halfW);
+      const y2 = node.y + fanLen * Math.sin(node.angle + halfW);
+      triangles.push(
+        `<polygon points="${node.x},${node.y} ${x1},${y1} ${x2},${y2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+        `<text x="${(x1 + x2) / 2 + 2}" y="${(y1 + y2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
+      );
+      if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
+        triangles.push(`<circle cx="${node.x}" cy="${node.y}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+      }
+      return;
+    }
+    if (node.layoutChildren) {
+      const isSelected = node.id === state.exportNodeId;
+      const isShared = state.sharedNodes.has(node.id);
+      dotData.push({
+        cx: node.x,
+        cy: node.y,
+        r: isSelected ? 6 : isShared ? 5 : 3,
+        fill: isSelected ? "#000" : isShared ? "#ff6600" : "#999",
+        nodeId: node.id,
+        sup: node.sup,
+        isTip: false,
+      });
+      node.layoutChildren.forEach(collect);
+    } else {
+      const isMotif = state.motifMatches.has(node.name);
+      const isName = state.nameMatches.has(node.name);
+      const spColor = getNodeColor(node, checkedSpecies);
+      let fill = "#333";
+      if (isMotif) {
+        const colors = getMotifColors(node.name);
+        fill = colors.length > 0 ? colors[0] : "#e22";
+      } else if (isName) {
+        fill = "#2563eb";
+      } else {
+        fill = spColor;
+      }
+      const r = isMotif || isName || spColor !== "#333" ? 3 : 2;
+      dotData.push({ cx: node.x, cy: node.y, r, fill, isTip: true, tipName: node.name, species: node.sp || "" });
+    }
+  }
+
+  collect(root);
+  emitFastBranches(fragments, branchPaths);
+  emitFastTrianglesAndDots(fragments, triangles, dotData);
+}
+
+function emitFastBranches(fragments, branchPaths) {
+  const byColor = {};
+  for (const branch of branchPaths) {
+    if (!byColor[branch.color]) byColor[branch.color] = [];
+    byColor[branch.color].push(`M${branch.x1},${branch.y1}L${branch.x2},${branch.y2}`);
+  }
+  for (const [color, segs] of Object.entries(byColor)) {
+    fragments.push(`<path d="${segs.join("")}" stroke="${color}" stroke-width="1" fill="none"/>`);
+  }
+}
+
+function emitFastTrianglesAndDots(fragments, triangles, dotData) {
+  for (const triangle of triangles) fragments.push(triangle);
+
+  const dotGroups = {};
+  for (const dot of dotData) {
+    const key = `${dot.fill}|${dot.r}`;
+    if (!dotGroups[key]) dotGroups[key] = { fill: dot.fill, r: dot.r, dots: [] };
+    dotGroups[key].dots.push(dot);
+  }
+
+  for (const group of Object.values(dotGroups)) {
+    const circles = group.dots.map(dot => {
+      if (dot.isTip) {
+        return `<circle cx="${dot.cx}" cy="${dot.cy}" r="${group.r}" fill="${group.fill}" class="tip-dot" data-tip="${dot.tipName}" data-species="${dot.species}"/>`;
+      }
+      return `<circle cx="${dot.cx}" cy="${dot.cy}" r="${group.r}" fill="${group.fill}" class="node-dot" data-nodeid="${dot.nodeId}"${dot.sup != null ? ` data-support="${dot.sup}"` : ""}/>`;
+    }).join("");
+    fragments.push(`<g>${circles}</g>`);
+  }
+
+  if (state.selectedTip) {
+    const selectedTipDot = dotData.find(dot => dot.isTip && dot.tipName === state.selectedTip);
+    if (selectedTipDot) {
+      fragments.push(`<circle cx="${selectedTipDot.cx}" cy="${selectedTipDot.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+    }
+  }
+  if (state.exportNodeId != null) {
+    const selectedNodeDot = dotData.find(dot => !dot.isTip && dot.nodeId === state.exportNodeId);
+    if (selectedNodeDot) {
+      fragments.push(`<circle cx="${selectedNodeDot.cx}" cy="${selectedNodeDot.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
+    }
+  }
+}
+
+export function buildExportSVGString() {
+  const original = document.getElementById("tree-svg");
+  const clone = original.cloneNode(true);
+  const cloneGroup = clone.querySelector("#tree-group");
+  const bbox = dom.group.getBBox();
+  const pad = 20;
+  const vx = bbox.x - pad;
+  const vy = bbox.y - pad;
+  const vw = bbox.width + pad * 2;
+  const vh = bbox.height + pad * 2;
+
+  clone.setAttribute("viewBox", `${vx} ${vy} ${vw} ${vh}`);
+  clone.setAttribute("width", vw);
+  clone.setAttribute("height", vh);
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  cloneGroup.removeAttribute("transform");
+
+  for (const [selector, style] of Object.entries(INLINE_STYLES)) {
+    clone.querySelectorAll(selector).forEach(element => {
+      element.setAttribute("style", `${element.getAttribute("style") || ""};${style}`);
+    });
+  }
+
+  return { svgString: new XMLSerializer().serializeToString(clone), width: vw, height: vh };
+}
