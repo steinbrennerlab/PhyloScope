@@ -209,7 +209,8 @@ An example dataset is provided in `example_data/`.
 - Each loaded dataset keeps its own independent color scale computed across all numeric values in that dataset file
 - Missing or non-numeric values such as `na` and `#NUM!` display as neutral gray cells
 - Hover over any heatmap cell to see tip name, dataset name, column name, and exact raw value
-- Initial release supports the **rectangular** tree layout only
+- Heatmaps are supported in **rectangular** and **circular** layouts
+- **Unrooted** layout does not render heatmaps
 
 ### Image Export
 - **SVG**: download a standalone SVG with inlined styles (opens in any browser or Inkscape)

@@ -84,7 +84,10 @@ export function renderTree() {
     [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species)
   );
 
-  const allowFastMode = state.fastMode && !(state.layoutMode === "rectangular" && state.activeHeatmaps.length > 0);
+  const allowFastMode = state.fastMode && !(
+    (state.layoutMode === "rectangular" || state.layoutMode === "circular") &&
+    state.activeHeatmaps.length > 0
+  );
   if (allowFastMode) {
     const key = getRenderCacheKey(checkedSpecies);
     if (state.renderCache && state.renderCacheKey === key) {
@@ -205,6 +208,7 @@ function renderCircular(fragments, checkedSpecies) {
   const rScale = state.usePhylogram ? 300 : 0;
   const rStep = state.usePhylogram ? 0 : 15;
   let leafIndex = 0;
+  const heatmapTips = [];
 
   function layout(node, depth) {
     if (isNodeHidden(node)) return null;
@@ -282,10 +286,16 @@ function renderCircular(fragments, checkedSpecies) {
       const ly = ny + (flip ? -4 : 4) * Math.sin(node.angle);
       drawTipDot(fragments, nx, ny, node, checkedSpecies);
       if (state.showTipLabels) drawTipLabelRadial(fragments, lx, ly, textAngle, anchor, node, checkedSpecies);
+      heatmapTips.push({
+        node,
+        angle: node.angle,
+        labelRadius: Math.hypot(lx, ly),
+      });
     }
   }
 
   draw(root);
+  drawCircularHeatmap(fragments, heatmapTips);
 }
 
 function renderUnrooted(fragments, checkedSpecies) {
@@ -815,6 +825,81 @@ function drawRectangularHeatmap(fragments, heatmapRows, startX) {
 
     offsetX += blockWidth + datasetGap;
   });
+}
+
+function drawCircularHeatmap(fragments, heatmapTips) {
+  if (state.activeHeatmaps.length === 0 || state.layoutMode !== "circular") return;
+  if (heatmapTips.length === 0) return;
+
+  const cellDepth = 10;
+  const cellArc = 0.028;
+  const columnGap = 3;
+  const datasetGap = 10;
+  let datasetOffset = 18;
+  const maxLabelRadius = Math.max(...heatmapTips.map(tip => tip.labelRadius), 0);
+
+  state.activeHeatmaps.forEach(heatmap => {
+    const columns = getHeatmapColumns(heatmap);
+    if (columns.length === 0) return;
+    const blockDepth = columns.length * (cellDepth + columnGap) - columnGap;
+    const ringInner = maxLabelRadius + datasetOffset;
+    const ringOuter = ringInner + blockDepth;
+
+    fragments.push(`<circle cx="0" cy="0" r="${ringInner - 3}" class="heatmap-dataset-outline"/>`);
+    fragments.push(`<circle cx="0" cy="0" r="${ringOuter + 3}" class="heatmap-dataset-outline"/>`);
+    fragments.push(
+      `<text x="${ringOuter + 8}" y="0" class="heatmap-dataset-title">${escapeHtml(heatmap.name)}</text>`
+    );
+
+    heatmapTips.forEach(tip => {
+      const rowValues = heatmap.tip_values[tip.node.name];
+      if (!rowValues) return;
+      columns.forEach((column, index) => {
+        const cell = rowValues[column];
+        if (!cell) return;
+        const innerR = ringInner + index * (cellDepth + columnGap);
+        const outerR = innerR + cellDepth;
+        const startAngle = tip.angle - cellArc / 2;
+        const endAngle = tip.angle + cellArc / 2;
+        const fill = getHeatmapColor(heatmap, cell.value);
+        const cls = cell.value == null ? "heatmap-cell heatmap-cell-missing" : "heatmap-cell";
+        fragments.push(buildAnnularCellPath(innerR, outerR, startAngle, endAngle, fill, cls, {
+          tip: tip.node.name,
+          column,
+          dataset: heatmap.name,
+          rawValue: cell.raw || "",
+          value: cell.value == null ? "" : String(cell.value),
+        }));
+      });
+    });
+
+    datasetOffset += blockDepth + datasetGap;
+  });
+}
+
+function buildAnnularCellPath(innerR, outerR, startAngle, endAngle, fill, cls, meta) {
+  const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
+  const x1 = innerR * Math.cos(startAngle);
+  const y1 = innerR * Math.sin(startAngle);
+  const x2 = outerR * Math.cos(startAngle);
+  const y2 = outerR * Math.sin(startAngle);
+  const x3 = outerR * Math.cos(endAngle);
+  const y3 = outerR * Math.sin(endAngle);
+  const x4 = innerR * Math.cos(endAngle);
+  const y4 = innerR * Math.sin(endAngle);
+
+  const attrs = [
+    `fill="${fill}"`,
+    `class="${cls}"`,
+    'data-heatmap="1"',
+    `data-heatmap-tip="${escapeHtml(meta.tip)}"`,
+    `data-column="${escapeHtml(meta.column)}"`,
+    `data-dataset="${escapeHtml(meta.dataset)}"`,
+    `data-raw-value="${escapeHtml(meta.rawValue)}"`,
+    `data-value="${escapeHtml(meta.value)}"`,
+  ].join(" ");
+
+  return `<path d="M${x1},${y1} L${x2},${y2} A${outerR},${outerR} 0 ${largeArc},1 ${x3},${y3} L${x4},${y4} A${innerR},${innerR} 0 ${largeArc},0 ${x1},${y1} Z" ${attrs}/>`;
 }
 
 function escapeHtml(value) {
