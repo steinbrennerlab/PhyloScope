@@ -34,6 +34,10 @@
         <label class="detected-label">Species mapping:</label>
         <span id="detected-ortho" class="detected-status">—</span>
       </div>
+      <div class="detected-row">
+        <label class="detected-label">Datasets:</label>
+        <span id="detected-datasets" class="detected-status">—</span>
+      </div>
     </div>
     <div id="setup-browser" style="display:none;">
       <div class="browser-header">
@@ -191,6 +195,21 @@
       <button id="pairwise-compare-btn" class="btn">Compare</button>
     </div>
     <div id="pairwise-result" class="hint" style="white-space:pre-wrap;"></div>
+  </div>
+
+  <div class="section">
+    <h3>Heatmap</h3>
+    <div class="row">
+      <select id="heatmap-dataset-select">
+        <option value="">Select dataset</option>
+      </select>
+      <button id="heatmap-load-btn" class="btn">Add</button>
+    </div>
+    <div class="row">
+      <button id="heatmap-clear-all-btn" class="btn-sm">Remove all</button>
+    </div>
+    <div id="heatmap-status" class="hint">No dataset loaded</div>
+    <div id="heatmap-panels"></div>
   </div>
 
   <div class="section">

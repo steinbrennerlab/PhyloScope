@@ -62,6 +62,10 @@ function getRenderCacheKey(checkedSpecies) {
     state.fastMode,
     [...state.hiddenTips].sort().join(","),
     JSON.stringify(state.nodeLabels),
+    JSON.stringify(state.activeHeatmaps.map(heatmap => ({
+      name: heatmap.name,
+      visibleColumns: heatmap.visibleColumns,
+    }))),
   ].join("|");
 }
 
@@ -80,7 +84,8 @@ export function renderTree() {
     [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species)
   );
 
-  if (state.fastMode) {
+  const allowFastMode = state.fastMode && !(state.layoutMode === "rectangular" && state.activeHeatmaps.length > 0);
+  if (allowFastMode) {
     const key = getRenderCacheKey(checkedSpecies);
     if (state.renderCache && state.renderCacheKey === key) {
       dom.group.innerHTML = state.renderCache;
@@ -100,7 +105,7 @@ export function renderTree() {
   }
 
   const html = fragments.join("\n");
-  if (state.fastMode) {
+  if (allowFastMode) {
     state.renderCache = html;
     state.renderCacheKey = getRenderCacheKey(checkedSpecies);
   }
@@ -119,6 +124,8 @@ export function renderTree() {
 function renderRectangular(fragments, checkedSpecies) {
   let leafIndex = 0;
   const xScale = state.usePhylogram ? 800 : 0;
+  const heatmapRows = [];
+  let heatmapAnchorX = 0;
 
   function layout(node, depth) {
     if (isNodeHidden(node)) return null;
@@ -147,7 +154,7 @@ function renderRectangular(fragments, checkedSpecies) {
 
   const root = layout(state.treeData, 0);
   if (!root) return;
-  if (state.fastMode) {
+  if (state.fastMode && state.activeHeatmaps.length === 0) {
     drawFastRectangular(fragments, root, checkedSpecies);
     return;
   }
@@ -181,11 +188,16 @@ function renderRectangular(fragments, checkedSpecies) {
       node.layoutChildren.forEach(draw);
     } else {
       drawTipDot(fragments, nx, ny, node, checkedSpecies);
-      if (state.showTipLabels) drawTipLabel(fragments, nx + 4, ny + 3, 0, node, checkedSpecies);
+      const labelX = nx + 4;
+      if (state.showTipLabels) drawTipLabel(fragments, labelX, ny + 3, 0, node, checkedSpecies);
+      const labelWidth = state.showTipLabels ? estimateTipLabelWidth(node) : 0;
+      heatmapAnchorX = Math.max(heatmapAnchorX, labelX + labelWidth);
+      heatmapRows.push({ node, y: ny - 5 });
     }
   }
 
   draw(root);
+  drawRectangularHeatmap(fragments, heatmapRows, heatmapAnchorX + 12);
 }
 
 function renderCircular(fragments, checkedSpecies) {
@@ -406,8 +418,7 @@ function drawTipLabel(fragments, x, y, rotation, node, checkedSpecies) {
   const color = isMotif && motifColors.length > 0 ? motifColors[0] : isName ? "#2563eb" : getNodeColor(node, checkedSpecies);
   const bold = highlight ? ' font-weight="bold"' : "";
   const transform = rotation ? ` transform="rotate(${rotation},${x},${y})"` : "";
-  let label = node.name;
-  if (state.showLengths && state.tipLengths[node.name] != null) label += ` (${state.tipLengths[node.name]} aa)`;
+  const label = getTipLabelText(node);
   fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}"${bold}${transform} data-tip="${node.name}" data-species="${node.sp || ""}">${label}</text>`);
   if (isMotif && motifColors.length > 0) {
     drawMotifPie(fragments, x - 4, y - 3, 3, motifColors);
@@ -424,8 +435,7 @@ function drawTipLabelRadial(fragments, x, y, angleDeg, anchor, node, checkedSpec
   const motifColors = isMotif ? getMotifColors(node.name) : [];
   const color = isMotif && motifColors.length > 0 ? motifColors[0] : isName ? "#2563eb" : getNodeColor(node, checkedSpecies);
   const bold = highlight ? ' font-weight="bold"' : "";
-  let label = node.name;
-  if (state.showLengths && state.tipLengths[node.name] != null) label += ` (${state.tipLengths[node.name]} aa)`;
+  const label = getTipLabelText(node);
   fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}"${bold} text-anchor="${anchor}" transform="rotate(${angleDeg},${x},${y})" data-tip="${node.name}" data-species="${node.sp || ""}">${label}</text>`);
   if (isMotif && motifColors.length > 0) {
     const rad = angleDeg * Math.PI / 180;
@@ -442,6 +452,7 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
   const vlinePaths = [];
   const dotData = [];
   const triangles = [];
+  const tipLabels = [];
 
   function collect(node) {
     const color = getNodeColor(node, checkedSpecies);
@@ -488,6 +499,9 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
       }
       const r = isMotif || isName || spColor !== "#333" ? 3 : 2;
       dotData.push({ cx: node.x, cy: node.y, r, fill, isTip: true, tipName: node.name, species: node.sp || "" });
+      if (state.showTipLabels) {
+        tipLabels.push({ x: node.x + 4, y: node.y + 3, node });
+      }
     }
   }
 
@@ -497,6 +511,7 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
     fragments.push(`<path d="${vlinePaths.map(v => `M${v.x},${v.y1}L${v.x},${v.y2}`).join("")}" stroke="#999" stroke-width="1" fill="none"/>`);
   }
   emitFastTrianglesAndDots(fragments, triangles, dotData);
+  tipLabels.forEach(label => drawTipLabel(fragments, label.x, label.y, 0, label.node, checkedSpecies));
 }
 
 function drawFastCircular(fragments, root, checkedSpecies, toXY) {
@@ -504,6 +519,7 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
   const arcPaths = [];
   const dotData = [];
   const triangles = [];
+  const tipLabels = [];
 
   function collect(node) {
     const [nx, ny] = toXY(node.r, node.angle);
@@ -561,6 +577,17 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
       }
       const r = isMotif || isName || spColor !== "#333" ? 3 : 2;
       dotData.push({ cx: nx, cy: ny, r, fill, isTip: true, tipName: node.name, species: node.sp || "" });
+      if (state.showTipLabels) {
+        const deg = node.angle * 180 / Math.PI;
+        const flip = (deg > 90 && deg < 270) || (deg < -90 && deg > -270);
+        tipLabels.push({
+          x: nx + (flip ? -4 : 4) * Math.cos(node.angle),
+          y: ny + (flip ? -4 : 4) * Math.sin(node.angle),
+          angle: flip ? deg + 180 : deg,
+          anchor: flip ? "end" : "start",
+          node,
+        });
+      }
     }
   }
 
@@ -570,12 +597,14 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
     fragments.push(`<path d="${arcPaths.join("")}" stroke="#999" stroke-width="1" fill="none"/>`);
   }
   emitFastTrianglesAndDots(fragments, triangles, dotData);
+  tipLabels.forEach(label => drawTipLabelRadial(fragments, label.x, label.y, label.angle, label.anchor, label.node, checkedSpecies));
 }
 
 function drawFastUnrooted(fragments, root, checkedSpecies) {
   const branchPaths = [];
   const dotData = [];
   const triangles = [];
+  const tipLabels = [];
 
   function collect(node) {
     const color = getNodeColor(node, checkedSpecies);
@@ -625,12 +654,24 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
       }
       const r = isMotif || isName || spColor !== "#333" ? 3 : 2;
       dotData.push({ cx: node.x, cy: node.y, r, fill, isTip: true, tipName: node.name, species: node.sp || "" });
+      if (state.showTipLabels) {
+        const deg = node.angle * 180 / Math.PI;
+        const flip = (deg > 90 && deg < 270) || (deg < -90 && deg > -270);
+        tipLabels.push({
+          x: node.x + 4 * Math.cos(node.angle),
+          y: node.y + 4 * Math.sin(node.angle),
+          angle: flip ? deg + 180 : deg,
+          anchor: flip ? "end" : "start",
+          node,
+        });
+      }
     }
   }
 
   collect(root);
   emitFastBranches(fragments, branchPaths);
   emitFastTrianglesAndDots(fragments, triangles, dotData);
+  tipLabels.forEach(label => drawTipLabelRadial(fragments, label.x, label.y, label.angle, label.anchor, label.node, checkedSpecies));
 }
 
 function emitFastBranches(fragments, branchPaths) {
@@ -676,6 +717,112 @@ function emitFastTrianglesAndDots(fragments, triangles, dotData) {
       fragments.push(`<circle cx="${selectedNodeDot.cx}" cy="${selectedNodeDot.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
     }
   }
+}
+
+function getTipLabelText(node) {
+  let label = node.name;
+  if (state.showLengths && state.tipLengths[node.name] != null) label += ` (${state.tipLengths[node.name]} aa)`;
+  return label;
+}
+
+function estimateTipLabelWidth(node) {
+  return getTipLabelText(node).length * 6;
+}
+
+function getHeatmapColumns(heatmap) {
+  if (!heatmap) return [];
+  return heatmap.visibleColumns.length > 0 ? heatmap.visibleColumns : heatmap.columns;
+}
+
+function getHeatmapColor(heatmap, value) {
+  if (value == null) return "#d9d9d9";
+  const min = heatmap?.min_value;
+  const max = heatmap?.max_value;
+  if (min == null || max == null || min === max) return "#f7f7f7";
+  const t = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  if (t <= 0.5) {
+    const local = t / 0.5;
+    return interpolateColor("#2166ac", "#f7f7f7", local);
+  }
+  return interpolateColor("#f7f7f7", "#b2182b", (t - 0.5) / 0.5);
+}
+
+function interpolateColor(a, b, t) {
+  const c1 = parseInt(a.slice(1), 16);
+  const c2 = parseInt(b.slice(1), 16);
+  const r1 = (c1 >> 16) & 255;
+  const g1 = (c1 >> 8) & 255;
+  const b1 = c1 & 255;
+  const r2 = (c2 >> 16) & 255;
+  const g2 = (c2 >> 8) & 255;
+  const b2 = c2 & 255;
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const blue = Math.round(b1 + (b2 - b1) * t);
+  return `rgb(${r},${g},${blue})`;
+}
+
+function drawRectangularHeatmap(fragments, heatmapRows, startX) {
+  if (state.activeHeatmaps.length === 0 || state.layoutMode !== "rectangular") return;
+
+  const cellWidth = 14;
+  const cellHeight = Math.max(8, state.tipSpacing - 4);
+  const gap = 2;
+  const datasetGap = 14;
+  const headerY = -6;
+  const titleY = -24;
+  const outlineTop = -30;
+  const outlineBottom = heatmapRows.length > 0 ? heatmapRows[heatmapRows.length - 1].y + cellHeight + 2 : 0;
+  let offsetX = startX;
+
+  state.activeHeatmaps.forEach(heatmap => {
+    const columns = getHeatmapColumns(heatmap);
+    if (columns.length === 0) return;
+    const blockWidth = columns.length * (cellWidth + gap) - gap;
+
+    fragments.push(
+      `<rect x="${offsetX - 4}" y="${outlineTop}" width="${blockWidth + 8}" height="${outlineBottom - outlineTop}" class="heatmap-dataset-outline"/>`
+    );
+    fragments.push(
+      `<text x="${offsetX}" y="${titleY}" class="heatmap-dataset-title">${escapeHtml(heatmap.name)}</text>`
+    );
+
+    columns.forEach((column, index) => {
+      const x = offsetX + index * (cellWidth + gap);
+      const labelX = x + cellWidth / 2;
+      fragments.push(
+        `<text x="${labelX}" y="${headerY}" class="heatmap-header-label" text-anchor="end" ` +
+        `transform="rotate(-55,${labelX},${headerY})">${escapeHtml(column)}</text>`
+      );
+    });
+
+    heatmapRows.forEach(({ node, y }) => {
+      const rowValues = heatmap.tip_values[node.name];
+      if (!rowValues) return;
+      columns.forEach((column, index) => {
+        const cell = rowValues[column];
+        if (!cell) return;
+        const x = offsetX + index * (cellWidth + gap);
+        const fill = getHeatmapColor(heatmap, cell.value);
+        const cls = cell.value == null ? "heatmap-cell heatmap-cell-missing" : "heatmap-cell";
+        fragments.push(
+          `<rect x="${x}" y="${y}" width="${cellWidth}" height="${cellHeight}" fill="${fill}" class="${cls}" ` +
+          `data-heatmap="1" data-heatmap-tip="${node.name}" data-column="${escapeHtml(column)}" data-dataset="${escapeHtml(heatmap.name)}" ` +
+          `data-raw-value="${escapeHtml(cell.raw || "")}" data-value="${cell.value == null ? "" : cell.value}"/>`
+        );
+      });
+    });
+
+    offsetX += blockWidth + datasetGap;
+  });
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 export function buildExportSVGString() {

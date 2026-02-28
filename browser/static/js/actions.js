@@ -27,6 +27,7 @@ function getStatusSummary(status) {
     num_species: status.num_species,
     nwk_name: status.nwk_name,
     aa_name: status.aa_name,
+    num_datasets: status.num_datasets,
   };
 }
 
@@ -42,6 +43,9 @@ function clearUiForReset() {
   document.getElementById("motif-result").textContent = "";
   document.getElementById("shared-result").textContent = "";
   document.getElementById("shared-nodes-list").innerHTML = "";
+  document.getElementById("heatmap-dataset-select").innerHTML = '<option value="">Select dataset</option>';
+  document.getElementById("heatmap-status").textContent = "No dataset loaded";
+  document.getElementById("heatmap-panels").innerHTML = "";
   document.getElementById("export-form").style.display = "none";
   document.getElementById("newick-form").style.display = "none";
   document.getElementById("subtree-bar").style.display = "none";
@@ -85,6 +89,170 @@ function updateFilterBadge() {
   } else {
     badge.style.display = "none";
   }
+}
+
+function getDefaultHeatmapColumns(columns) {
+  return columns.length <= 8 ? [...columns] : columns.slice(0, 5);
+}
+
+function updateHeatmapStatus() {
+  const status = document.getElementById("heatmap-status");
+  if (state.activeHeatmaps.length === 0) {
+    status.textContent = state.datasetFiles.length > 0 ? "Add one or more datasets to render rectangular heatmaps" : "No dataset files found";
+    return;
+  }
+  const datasetWord = state.activeHeatmaps.length === 1 ? "dataset" : "datasets";
+  status.textContent = `${state.activeHeatmaps.length} ${datasetWord} loaded with independent color scales`;
+}
+
+function populateDatasetSelect() {
+  const select = document.getElementById("heatmap-dataset-select");
+  select.innerHTML = '<option value="">Select dataset</option>';
+  state.datasetFiles.forEach(name => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    select.appendChild(option);
+  });
+  select.value = "";
+}
+
+function updateHeatmapPanels() {
+  const container = document.getElementById("heatmap-panels");
+  container.innerHTML = "";
+  state.activeHeatmaps.forEach(heatmap => {
+    const panel = document.createElement("div");
+    panel.className = "heatmap-panel";
+
+    const header = document.createElement("div");
+    header.className = "heatmap-panel-header";
+    const title = document.createElement("span");
+    title.className = "heatmap-panel-title";
+    title.textContent = heatmap.name;
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "btn-sm";
+    removeBtn.textContent = "Remove";
+    removeBtn.addEventListener("click", () => removeHeatmapDataset(heatmap.name));
+    header.append(title, removeBtn);
+
+    const summary = document.createElement("div");
+    summary.className = "hint";
+    summary.textContent =
+      `${heatmap.matched_row_count} matched, ${heatmap.unmatched_row_count} unmatched ignored, ` +
+      `${heatmap.visibleColumns.length}/${heatmap.columns.length} columns shown`;
+
+    panel.append(header, summary, buildHeatmapLegendElement(heatmap), buildHeatmapColumnListElement(heatmap));
+    container.appendChild(panel);
+  });
+}
+
+function buildHeatmapLegendElement(heatmap) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "heatmap-legend";
+  if (heatmap.min_value == null || heatmap.max_value == null) {
+    wrapper.style.display = "none";
+    return wrapper;
+  }
+  const bar = document.createElement("div");
+  bar.className = "heatmap-legend-bar";
+  const labels = document.createElement("div");
+  labels.className = "heatmap-legend-labels";
+  const min = document.createElement("span");
+  min.textContent = heatmap.min_value.toFixed(2);
+  const max = document.createElement("span");
+  max.textContent = heatmap.max_value.toFixed(2);
+  labels.append(min, max);
+  const missing = document.createElement("div");
+  missing.className = "heatmap-legend-missing";
+  missing.textContent = "Missing values shown in gray";
+  wrapper.append(bar, labels, missing);
+  return wrapper;
+}
+
+function buildHeatmapColumnListElement(heatmap) {
+  const container = document.createElement("div");
+  container.className = "heatmap-columns";
+  const visible = new Set(heatmap.visibleColumns);
+  heatmap.columns.forEach(column => {
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = visible.has(column);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        heatmap.visibleColumns.push(column);
+      } else {
+        heatmap.visibleColumns = heatmap.visibleColumns.filter(name => name !== column);
+      }
+      invalidateRenderCache();
+      updateHeatmapPanels();
+      renderTree();
+    });
+    const text = document.createElement("span");
+    text.textContent = column;
+    label.append(checkbox, text);
+    container.appendChild(label);
+  });
+  return container;
+}
+
+async function refreshDatasetList() {
+  const resp = await fetch("/api/datasets");
+  const data = await resp.json();
+  state.datasetFiles = data.datasets || [];
+  populateDatasetSelect();
+  updateHeatmapStatus();
+}
+
+async function loadHeatmapDataset(name, preserveColumns = false, presetColumns = []) {
+  if (!name) return;
+  const existing = state.activeHeatmaps.find(heatmap => heatmap.name === name);
+  if (existing && !preserveColumns) {
+    document.getElementById("heatmap-status").textContent = `${name} is already loaded`;
+    return;
+  }
+  const resp = await fetch(`/api/dataset?name=${encodeURIComponent(name)}`);
+  const data = await resp.json();
+  if (!resp.ok || data.error) {
+    document.getElementById("heatmap-status").textContent = data.error || "Failed to load dataset";
+    return;
+  }
+  const visibleColumns = preserveColumns && presetColumns.length > 0
+    ? data.columns.filter(column => presetColumns.includes(column))
+    : getDefaultHeatmapColumns(data.columns);
+  const next = {
+    ...data,
+    visibleColumns: visibleColumns.length > 0 ? visibleColumns : getDefaultHeatmapColumns(data.columns),
+  };
+  if (existing) {
+    const index = state.activeHeatmaps.findIndex(heatmap => heatmap.name === name);
+    state.activeHeatmaps[index] = next;
+  } else {
+    state.activeHeatmaps.push(next);
+  }
+  populateDatasetSelect();
+  updateHeatmapPanels();
+  updateHeatmapStatus();
+  invalidateRenderCache();
+  renderTree();
+}
+
+function removeHeatmapDataset(name) {
+  state.activeHeatmaps = state.activeHeatmaps.filter(heatmap => heatmap.name !== name);
+  populateDatasetSelect();
+  updateHeatmapPanels();
+  updateHeatmapStatus();
+  invalidateRenderCache();
+  renderTree();
+}
+
+function clearHeatmapDatasets() {
+  state.activeHeatmaps = [];
+  populateDatasetSelect();
+  updateHeatmapPanels();
+  updateHeatmapStatus();
+  invalidateRenderCache();
+  renderTree();
 }
 
 function updateLabelInput() {
@@ -301,6 +469,7 @@ function showLoadedInfo(status, totalTips) {
   } else {
     lines.push(`<span class="loaded-label">Species:</span> <span class="loaded-none">none</span>`);
   }
+  lines.push(`<span class="loaded-label">Datasets:</span> <span class="loaded-value">${status.num_datasets || 0}</span>`);
   lines.push(`<span class="loaded-label">Folder:</span> <span class="loaded-value">${status.input_dir}</span>`);
   el.innerHTML = lines.join("<br>");
 }
@@ -489,6 +658,20 @@ function buildTipTooltip(tipName, species) {
       if (matching.length > 0) lines.push(`Motifs: ${matching.map(motif => motif.pattern).join(", ")}`);
       lines.push("Click to copy name · Shift+click to copy FASTA");
     }
+  }
+  return lines.join("\n");
+}
+
+function buildHeatmapTooltip(el) {
+  const lines = [
+    el.dataset.heatmapTip,
+    `Dataset: ${el.dataset.dataset}`,
+    `Column: ${el.dataset.column}`,
+  ];
+  if (el.dataset.value === "") {
+    lines.push("Value: missing");
+  } else {
+    lines.push(`Value: ${el.dataset.rawValue || el.dataset.value}`);
   }
   return lines.join("\n");
 }
@@ -778,6 +961,10 @@ function saveSession() {
     scale: state.scale,
     tx: state.tx,
     ty: state.ty,
+    activeHeatmaps: state.activeHeatmaps.map(heatmap => ({
+      name: heatmap.name,
+      visibleColumns: [...heatmap.visibleColumns],
+    })),
   };
 
   triggerDownload(new Blob([JSON.stringify(session, null, 2)], { type: "application/json" }), "phyloscope-session.json");
@@ -835,7 +1022,6 @@ async function loadSession(fromSetup = false) {
       state.scale = session.scale ?? 1;
       state.tx = session.tx ?? 20;
       state.ty = session.ty ?? 20;
-
       document.querySelector(`input[name="layout"][value="${state.layoutMode}"]`).checked = true;
       document.getElementById("phylogram-toggle").checked = state.usePhylogram;
       document.getElementById("tip-labels-toggle").checked = state.showTipLabels;
@@ -876,6 +1062,13 @@ async function loadSession(fromSetup = false) {
         }
         rebuildMotifMatches();
         buildMotifList();
+      }
+
+      clearHeatmapDatasets();
+      if (session.activeHeatmaps) {
+        for (const heatmap of session.activeHeatmaps) {
+          await loadHeatmapDataset(heatmap.name, true, heatmap.visibleColumns || []);
+        }
       }
 
       updateFilterBadge();
@@ -1093,6 +1286,10 @@ async function scanFolder(dirPath) {
     dom.detectedAaInput.placeholder = "none found (optional)";
     dom.detectedOrthoSpan.textContent = data.has_ortho ? "orthofinder-input/ found ✓" : "orthofinder-input/ not found";
     dom.detectedOrthoSpan.style.color = data.has_ortho ? "#27ae60" : "#888";
+    dom.detectedDatasetSpan.textContent = data.dataset_files.length > 0
+      ? `${data.dataset_files.length} file${data.dataset_files.length === 1 ? "" : "s"} found`
+      : "none found";
+    dom.detectedDatasetSpan.style.color = data.dataset_files.length > 0 ? "#27ae60" : "#888";
   } catch {
     dom.detectedFilesPanel.style.display = "none";
   }
@@ -1324,6 +1521,11 @@ function setupControls() {
   document.getElementById("pairwise-compare-btn").addEventListener("click", comparePairwise);
   document.getElementById("session-save-btn").addEventListener("click", saveSession);
   document.getElementById("session-load-btn").addEventListener("click", () => loadSession(false));
+  document.getElementById("heatmap-load-btn").addEventListener("click", () => {
+    const name = document.getElementById("heatmap-dataset-select").value;
+    loadHeatmapDataset(name);
+  });
+  document.getElementById("heatmap-clear-all-btn").addEventListener("click", clearHeatmapDatasets);
 
   dom.svg.addEventListener("wheel", event => {
     event.preventDefault();
@@ -1398,6 +1600,7 @@ export async function init() {
   buildSpeciesList(speciesData.species);
   buildExcludeSpeciesList(speciesData.species);
   setupControls();
+  await refreshDatasetList();
 
   if (totalTips > 2000 && state.fastMode && state.treeData.ch) {
     const targetLeaves = 50;
@@ -1481,6 +1684,13 @@ function onTreeClick(event) {
 
 function onTreeHover(event) {
   const el = event.target;
+  if (el.dataset?.heatmap) {
+    dom.tooltip.textContent = buildHeatmapTooltip(el);
+    dom.tooltip.style.display = "block";
+    dom.tooltip.style.left = `${event.clientX + 12}px`;
+    dom.tooltip.style.top = `${event.clientY - 10}px`;
+    return;
+  }
   if (el.dataset?.tip) {
     dom.tooltip.textContent = buildTipTooltip(el.dataset.tip, el.dataset.species);
     dom.tooltip.style.display = "block";

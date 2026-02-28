@@ -41,6 +41,8 @@ export const state = {
   dragStartY: 0,
   browserCurrentDir: null,
   browserParentDir: null,
+  datasetFiles: [],
+  activeHeatmaps: [],
 };
 
 export const dom = {
@@ -61,6 +63,7 @@ export const dom = {
   detectedNwkInput: document.getElementById("detected-nwk"),
   detectedAaInput: document.getElementById("detected-aa"),
   detectedOrthoSpan: document.getElementById("detected-ortho"),
+  detectedDatasetSpan: document.getElementById("detected-datasets"),
 };
 
 export const PALETTE = [
@@ -129,4 +132,8 @@ export function resetClientState() {
   state.dragging = false;
   state.dragStartX = 0;
   state.dragStartY = 0;
+  state.browserCurrentDir = null;
+  state.browserParentDir = null;
+  state.datasetFiles = [];
+  state.activeHeatmaps = [];
 }

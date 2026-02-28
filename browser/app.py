@@ -1,5 +1,6 @@
 """Phylogenetic tree browser — FastAPI backend."""
 
+import csv
 import json
 import os
 import re
@@ -28,6 +29,7 @@ EMPTY_STATE = {
     "num_species": 0,
     "nwk_name": None,
     "aa_name": None,
+    "dataset_files": [],
 }
 state = EMPTY_STATE.copy()
 
@@ -43,6 +45,7 @@ def loaded_status_payload():
         "num_species": state["num_species"],
         "nwk_name": state["nwk_name"],
         "aa_name": state["aa_name"],
+        "num_datasets": len(state["dataset_files"]),
     }
 
 # ---------------------------------------------------------------------------
@@ -293,6 +296,97 @@ def tree_to_json(node):
     return result
 
 
+def list_dataset_files(input_dir):
+    """Return sorted dataset filenames from input_dir/dataset."""
+    dataset_dir = input_dir / "dataset"
+    if not dataset_dir.is_dir():
+        return []
+    return sorted(
+        f.name for f in dataset_dir.iterdir()
+        if f.is_file() and f.suffix.lower() == ".txt" and not f.name.endswith(":Zone.Identifier")
+    )
+
+
+def parse_numeric_value(value):
+    """Parse a dataset cell into float or None."""
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.lower() in {"na", "nan", "#num!", "null"}:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def parse_dataset_file(dataset_path, tree_data):
+    """Parse a tab-delimited dataset and keep only rows matching tree tips."""
+    tree_tips = set(collect_descendant_tips(tree_data))
+    with open(dataset_path, newline="") as handle:
+        reader = csv.reader(handle, delimiter="\t")
+        rows = list(reader)
+
+    if not rows:
+        return None, "Dataset file is empty"
+
+    header = rows[0]
+    if len(header) < 2:
+        return None, "Dataset file must have a taxa column and at least one value column"
+
+    columns = header[1:]
+    tip_values = {}
+    matched_row_count = 0
+    unmatched_row_count = 0
+    matched_tip_names = []
+    missing_value_count = 0
+    numeric_values = []
+
+    for row in rows[1:]:
+        if not row:
+            continue
+        tip_name = row[0].strip()
+        if not tip_name:
+            continue
+        values = row[1:]
+        if tip_name not in tree_tips:
+            unmatched_row_count += 1
+            continue
+
+        matched_row_count += 1
+        matched_tip_names.append(tip_name)
+        row_values = {}
+        for idx, column in enumerate(columns):
+            raw_value = values[idx] if idx < len(values) else ""
+            numeric_value = parse_numeric_value(raw_value)
+            if numeric_value is None:
+                missing_value_count += 1
+            else:
+                numeric_values.append(numeric_value)
+            row_values[column] = {
+                "raw": raw_value,
+                "value": numeric_value,
+            }
+        tip_values[tip_name] = row_values
+
+    min_value = min(numeric_values) if numeric_values else None
+    max_value = max(numeric_values) if numeric_values else None
+
+    return {
+        "name": dataset_path.name,
+        "columns": columns,
+        "tip_values": tip_values,
+        "matched_tips": sorted(matched_tip_names),
+        "matched_row_count": matched_row_count,
+        "unmatched_row_count": unmatched_row_count,
+        "missing_value_count": missing_value_count,
+        "min_value": min_value,
+        "max_value": max_value,
+    }, None
+
+
 # ---------------------------------------------------------------------------
 # Load data from an input directory
 # ---------------------------------------------------------------------------
@@ -376,6 +470,7 @@ def load_data(input_dir_str, nwk_file=None, aa_file=None):
         species_to_tips, tip_to_species = {}, {}
 
     tree_json = tree_to_json(tree_data)
+    dataset_files = list_dataset_files(input_dir)
 
     # Update global state
     has_fasta = protein_seqs is not None
@@ -394,9 +489,10 @@ def load_data(input_dir_str, nwk_file=None, aa_file=None):
         "num_species": len(species_to_tips),
         "nwk_name": nwk_file.name,
         "aa_name": aa_file.name if aa_file else None,
+        "dataset_files": dataset_files,
     })
 
-    print(f"Loaded: {state['num_seqs']} sequences, {state['num_species']} species")
+    print(f"Loaded: {state['num_seqs']} sequences, {state['num_species']} species, {len(dataset_files)} datasets")
     return True, None
 
 
@@ -628,8 +724,14 @@ async def api_browse_files(path: str = Query(..., description="Directory to scan
     nwk_files = sorted(f.name for f in p.glob("*.nwk"))
     aa_files = sorted(f.name for f in p.glob("*.aa.fa"))
     has_ortho = (p / "orthofinder-input").is_dir()
+    dataset_files = list_dataset_files(p)
 
-    return {"nwk_files": nwk_files, "aa_files": aa_files, "has_ortho": has_ortho}
+    return {
+        "nwk_files": nwk_files,
+        "aa_files": aa_files,
+        "has_ortho": has_ortho,
+        "dataset_files": dataset_files,
+    }
 
 
 @app.post("/api/load")
@@ -846,6 +948,33 @@ async def tip_names():
     if not state["has_fasta"]:
         return {"tips": []}
     return {"tips": sorted(state["protein_seqs"].keys())}
+
+
+@app.get("/api/datasets")
+async def list_datasets():
+    """Return available dataset files for the loaded input folder."""
+    err = require_loaded()
+    if err:
+        return err
+    return {"datasets": state["dataset_files"]}
+
+
+@app.get("/api/dataset")
+async def get_dataset(name: str = Query(..., description="Dataset filename")):
+    """Return parsed dataset values for tips present in the current tree."""
+    err = require_loaded()
+    if err:
+        return err
+    if not name:
+        return JSONResponse(status_code=400, content={"error": "name is required"})
+    if name not in state["dataset_files"]:
+        return JSONResponse(status_code=404, content={"error": f"Dataset not found: {name}"})
+
+    dataset_path = Path(state["input_dir"]) / "dataset" / name
+    parsed, error = parse_dataset_file(dataset_path, state["tree_data"])
+    if error:
+        return JSONResponse(status_code=400, content={"error": error})
+    return parsed
 
 
 @app.get("/api/export")

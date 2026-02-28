@@ -10,8 +10,10 @@ from app import (
     api_status,
     export_alignment,
     export_newick,
+    get_dataset,
     get_species,
     get_tree,
+    list_datasets,
     load_data,
     node_tips,
     search_motif,
@@ -24,6 +26,8 @@ SMALL_TREE = "((tipA:0.1,tipB:0.2)90:0.3,tipC:0.4);"
 SMALL_FASTA = ">tipA\nMKT-AA\n>tipB\nMKTGAA\n>tipC\nMKTG-A\n"
 SPECIES_A = ">tipA\nATG\n>tipB\nATG\n"
 SPECIES_B = ">tipC\nATG\n"
+DATASET = "taxa\tcondA\tcondB\nmissingTip\t5\t7\ntipA\t1.5\tna\ntipC\t#NUM!\t3.0\n"
+DATASET_2 = "taxa\tstressA\tstressB\ntipB\t10\t12\ntipC\t8\t9\notherMissing\t1\t2\n"
 
 
 def build_fixture(root: Path):
@@ -33,6 +37,10 @@ def build_fixture(root: Path):
     ortho_dir.mkdir()
     (ortho_dir / "speciesA.fa").write_text(SPECIES_A)
     (ortho_dir / "speciesB.fa").write_text(SPECIES_B)
+    dataset_dir = root / "dataset"
+    dataset_dir.mkdir()
+    (dataset_dir / "heatmap.txt").write_text(DATASET)
+    (dataset_dir / "heatmap2.txt").write_text(DATASET_2)
 
 
 def main():
@@ -50,6 +58,7 @@ def main():
         assert error is None
         assert state["loaded"] is True
         assert state["has_fasta"] is True
+        assert state["dataset_files"] == ["heatmap.txt", "heatmap2.txt"]
 
         tree_data = asyncio.run(get_tree())
         assert "id" in tree_data
@@ -59,6 +68,22 @@ def main():
 
         tips = asyncio.run(tip_names())["tips"]
         assert tips == ["tipA", "tipB", "tipC"]
+
+        datasets = asyncio.run(list_datasets())
+        assert datasets["datasets"] == ["heatmap.txt", "heatmap2.txt"]
+
+        dataset = asyncio.run(get_dataset(name="heatmap.txt"))
+        assert dataset["matched_row_count"] == 2
+        assert dataset["unmatched_row_count"] == 1
+        assert dataset["min_value"] == 1.5
+        assert dataset["max_value"] == 3.0
+        assert dataset["tip_values"]["tipA"]["condB"]["value"] is None
+
+        dataset_2 = asyncio.run(get_dataset(name="heatmap2.txt"))
+        assert dataset_2["matched_row_count"] == 2
+        assert dataset_2["unmatched_row_count"] == 1
+        assert dataset_2["min_value"] == 8.0
+        assert dataset_2["max_value"] == 12.0
 
         motif = asyncio.run(search_motif(pattern="KT", type="regex"))
         assert motif["matched_tips"] == tips

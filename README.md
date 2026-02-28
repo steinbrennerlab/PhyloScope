@@ -105,6 +105,7 @@ Point PhyloScope at any folder containing:
 | `*.nwk` | Newick tree (exactly one) |
 | `*.aa.fa` | Gapped protein alignment (exactly one, optional) |
 | `orthofinder-input/*.fa` | Per-species FASTA files for tip-to-species mapping (optional) |
+| `dataset/*.txt` | Tab-delimited tip datasets for rectangular heatmap display (optional) |
 
 An example dataset is provided in `example_data/`.
 
@@ -200,6 +201,16 @@ An example dataset is provided in `example_data/`.
   - **Patristic distance**: sum of branch lengths from each tip to their LCA (computed client-side)
   - **Sequence identity**: percentage of identical positions at ungapped alignment columns (computed server-side, requires alignment)
 
+### Heatmap
+- Load optional tab-delimited files from `dataset/*.txt`
+- First column must contain tip names (`taxa` in the example files); remaining columns become heatmap tracks
+- Only rows whose tip names exactly match tree tips are rendered; unmatched dataset rows are ignored
+- Multiple dataset files can be loaded at the same time
+- Each loaded dataset keeps its own independent color scale computed across all numeric values in that dataset file
+- Missing or non-numeric values such as `na` and `#NUM!` display as neutral gray cells
+- Hover over any heatmap cell to see tip name, dataset name, column name, and exact raw value
+- Initial release supports the **rectangular** tree layout only
+
 ### Image Export
 - **SVG**: download a standalone SVG with inlined styles (opens in any browser or Inkscape)
 - **PNG**: download a 2x resolution PNG for presentations and documents
@@ -239,6 +250,8 @@ An example dataset is provided in `example_data/`.
 | `GET /api/nodes-by-species?species=X&exclude=Y` | Find nodes with required/excluded species |
 | `GET /api/node-tips?node_id=N` | List descendant tip names for a node |
 | `GET /api/tip-names` | All tip names (for autocomplete) |
+| `GET /api/datasets` | List available dataset files in `dataset/` |
+| `GET /api/dataset?name=...` | Load parsed heatmap data for one dataset file |
 | `GET /api/export?node_id=N&...` | Download gapped FASTA for a subtree |
 | `GET /api/export-newick?node_id=N` | Download subtree as Newick string |
 | `GET /api/pairwise?tip1=X&tip2=Y` | Pairwise sequence identity between two tips |
