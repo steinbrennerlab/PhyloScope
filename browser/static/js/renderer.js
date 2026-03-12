@@ -1,4 +1,4 @@
-import { dom, INLINE_STYLES, state } from "./state.js";
+import { dom, getInlineStyles, state } from "./state.js";
 import {
   collectAllTipNames,
   countAllTips,
@@ -60,6 +60,7 @@ function getRenderCacheKey(checkedSpecies) {
     state.exportNodeId,
     state.selectedTip,
     state.showTipLabels,
+    state.tipLabelSize,
     state.showLengths,
     state.showBootstraps,
     state.fastMode,
@@ -432,7 +433,7 @@ function drawTipLabel(fragments, x, y, rotation, node, checkedSpecies) {
   const bold = highlight ? ' font-weight="bold"' : "";
   const transform = rotation ? ` transform="rotate(${rotation},${x},${y})"` : "";
   const label = getTipLabelText(node);
-  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}"${bold}${transform} data-tip="${node.name}" data-species="${node.sp || ""}">${label}</text>`);
+  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}" font-size="${state.tipLabelSize}"${bold}${transform} data-tip="${node.name}" data-species="${node.sp || ""}">${label}</text>`);
   if (isMotif && motifColors.length > 0) {
     drawMotifPie(fragments, x - 4, y - 3, 3, motifColors);
   }
@@ -449,7 +450,7 @@ function drawTipLabelRadial(fragments, x, y, angleDeg, anchor, node, checkedSpec
   const color = isMotif && motifColors.length > 0 ? motifColors[0] : isName ? "#2563eb" : getNodeColor(node, checkedSpecies);
   const bold = highlight ? ' font-weight="bold"' : "";
   const label = getTipLabelText(node);
-  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}"${bold} text-anchor="${anchor}" transform="rotate(${angleDeg},${x},${y})" data-tip="${node.name}" data-species="${node.sp || ""}">${label}</text>`);
+  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}" font-size="${state.tipLabelSize}"${bold} text-anchor="${anchor}" transform="rotate(${angleDeg},${x},${y})" data-tip="${node.name}" data-species="${node.sp || ""}">${label}</text>`);
   if (isMotif && motifColors.length > 0) {
     const rad = angleDeg * Math.PI / 180;
     drawMotifPie(fragments, x - 6 * Math.cos(rad), y - 6 * Math.sin(rad), 3, motifColors);
@@ -474,9 +475,10 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
     if (node.collapsed) {
       const triH = (state.uniformTriangles ? 30 : Math.min(node.tipCount * 2, 40)) * state.triangleScale / 100;
       const triW = 30 * state.triangleScale / 100;
+      const triLabel = state.nodeLabels[node.id] ? `${state.nodeLabels[node.id]} (${node.tipCount})` : `${node.tipCount} tips`;
       triangles.push(
         `<polygon points="${node.x},${node.y} ${node.x + triW},${node.y - triH / 2} ${node.x + triW},${node.y + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
-        `<text x="${node.x + triW + 4}" y="${node.y + 3}" font-size="9" fill="#666">${node.tipCount} tips</text>`
+        `<text x="${node.x + triW + 4}" y="${node.y + 3}" font-size="9" fill="#666">${triLabel}</text>`
       );
       if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
         triangles.push(`<circle cx="${node.x}" cy="${node.y}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
@@ -730,6 +732,16 @@ function emitFastTrianglesAndDots(fragments, triangles, dotData) {
       fragments.push(`<circle cx="${selectedNodeDot.cx}" cy="${selectedNodeDot.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
     }
   }
+
+  for (const dot of dotData) {
+    if (dot.isTip) continue;
+    if (state.showBootstraps && dot.sup != null) {
+      fragments.push(`<text x="${dot.cx + 6}" y="${dot.cy - 5}" class="bootstrap-label">${dot.sup}</text>`);
+    }
+    if (state.nodeLabels[dot.nodeId]) {
+      fragments.push(`<text x="${dot.cx + 8}" y="${dot.cy + 4}" class="node-label">${state.nodeLabels[dot.nodeId]}</text>`);
+    }
+  }
 }
 
 function getTipLabelText(node) {
@@ -739,7 +751,7 @@ function getTipLabelText(node) {
 }
 
 function estimateTipLabelWidth(node) {
-  return getTipLabelText(node).length * 6;
+  return getTipLabelText(node).length * state.tipLabelSize * 0.6;
 }
 
 function getHeatmapColumns(heatmap) {
@@ -930,7 +942,7 @@ export function buildExportSVGString() {
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   cloneGroup.removeAttribute("transform");
 
-  for (const [selector, style] of Object.entries(INLINE_STYLES)) {
+  for (const [selector, style] of Object.entries(getInlineStyles())) {
     clone.querySelectorAll(selector).forEach(element => {
       element.setAttribute("style", `${element.getAttribute("style") || ""};${style}`);
     });

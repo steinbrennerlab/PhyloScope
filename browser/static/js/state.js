@@ -16,6 +16,7 @@ export const state = {
   tipSpacing: 16,
   layoutMode: "rectangular",
   showTipLabels: true,
+  tipLabelSize: 10,
   showBootstraps: false,
   uniformTriangles: false,
   triangleScale: 100,
@@ -82,14 +83,16 @@ export const MOTIF_PALETTE = [
   "#c0392b", "#27ae60", "#d35400", "#2980b9", "#f39c12",
 ];
 
-export const INLINE_STYLES = {
-  ".tip-label": "font-size:10px;font-family:system-ui,sans-serif",
-  ".motif-match": "stroke:#e22;stroke-width:2",
-  ".shared-node": "fill:#ff6600;stroke:#c40;stroke-width:1.5",
-  ".collapsed-triangle": "fill:#cde;stroke:#89a",
-  ".bootstrap-label": "font-size:8px;fill:#666",
-  ".node-label": "font-size:10px;font-weight:bold;fill:#333;font-family:system-ui,sans-serif",
-};
+export function getInlineStyles() {
+  return {
+    ".tip-label": `font-size:${state.tipLabelSize}px;font-family:system-ui,sans-serif`,
+    ".motif-match": "stroke:#e22;stroke-width:2",
+    ".shared-node": "fill:#ff6600;stroke:#c40;stroke-width:1.5",
+    ".collapsed-triangle": "fill:#cde;stroke:#89a",
+    ".bootstrap-label": "font-size:8px;fill:#666",
+    ".node-label": "font-size:10px;font-weight:bold;fill:#333;font-family:system-ui,sans-serif",
+  };
+}
 
 export function resetClientState() {
   state.treeData = null;
@@ -109,6 +112,7 @@ export function resetClientState() {
   state.tipSpacing = 16;
   state.layoutMode = "rectangular";
   state.showTipLabels = true;
+  state.tipLabelSize = 10;
   state.showBootstraps = false;
   state.uniformTriangles = false;
   state.triangleScale = 100;

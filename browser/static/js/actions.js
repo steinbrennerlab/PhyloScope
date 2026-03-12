@@ -957,6 +957,7 @@ function saveSession() {
     uniformTriangles: state.uniformTriangles,
     triangleScale: state.triangleScale,
     tipSpacing: state.tipSpacing,
+    tipLabelSize: state.tipLabelSize,
     hiddenTips: [...state.hiddenTips],
     scale: state.scale,
     tx: state.tx,
@@ -1019,6 +1020,7 @@ async function loadSession(fromSetup = false) {
       state.uniformTriangles = session.uniformTriangles ?? false;
       state.triangleScale = session.triangleScale ?? 100;
       state.tipSpacing = session.tipSpacing ?? 16;
+      state.tipLabelSize = session.tipLabelSize ?? 10;
       state.scale = session.scale ?? 1;
       state.tx = session.tx ?? 20;
       state.ty = session.ty ?? 20;
@@ -1031,6 +1033,7 @@ async function loadSession(fromSetup = false) {
       document.getElementById("uniform-triangles-toggle").checked = state.uniformTriangles;
       document.getElementById("triangle-size").value = state.triangleScale;
       document.getElementById("tip-spacing").value = state.tipSpacing;
+      document.getElementById("tip-label-size").value = state.tipLabelSize;
 
       if (session.checkedSpecies) {
         const checkSet = new Set(session.checkedSpecies);
@@ -1415,6 +1418,10 @@ function setupControls() {
   });
   document.getElementById("tip-labels-toggle").addEventListener("change", event => {
     state.showTipLabels = event.target.checked;
+    renderTree();
+  });
+  document.getElementById("tip-label-size").addEventListener("input", event => {
+    state.tipLabelSize = +event.target.value;
     renderTree();
   });
   document.getElementById("bootstrap-toggle").addEventListener("change", event => {

@@ -36,7 +36,7 @@ input[type=text] { flex: 1; }
   max-width: 400px; white-space: pre-wrap;
 }
 
-.tip-label { font-size: 10px; cursor: pointer; }
+.tip-label { cursor: pointer; }
 .tip-label:hover { font-weight: bold; }
 .node-dot { cursor: pointer; }
 .motif-match { stroke: #e22; stroke-width: 2; }
