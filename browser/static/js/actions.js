@@ -1031,6 +1031,7 @@ function comparePairwise() {
         lines.push(result.error);
       } else {
         lines.push(`Sequence identity: ${(result.identity * 100).toFixed(1)}% (${result.identical_positions}/${result.aligned_length} positions)`);
+        lines.push(`Sequence similarity: ${(result.similarity * 100).toFixed(1)}% (${result.similar_positions}/${result.aligned_length} positions)`);
       }
     }
   }

@@ -245,20 +245,37 @@ export function refPosToColumns(refSeqGapped, refStart, refEnd) {
 /**
  * Compute pairwise sequence identity between two gapped sequences.
  */
+// BLOSUM62 positive-score pairs (similarity groups)
+const BLOSUM62_SIMILAR = new Set([
+  "AG","AS","DE","DN","EK","EQ","FW","FY","HN","HQ","HY",
+  "IL","IM","IV","KQ","KR","LM","LV","MV","NQ","NS","ST","WY",
+]);
+
+function areSimilar(a, b) {
+  if (a === b) return true;
+  const pair = a < b ? a + b : b + a;
+  return BLOSUM62_SIMILAR.has(pair);
+}
+
 export function computePairwiseIdentity(seq1, seq2) {
   if (seq1.length !== seq2.length) {
     return { error: "Sequences have different lengths in alignment" };
   }
   let identical = 0;
+  let similar = 0;
   let aligned = 0;
   for (let i = 0; i < seq1.length; i++) {
-    if (seq1[i] === "-" || seq2[i] === "-") continue;
+    const a = seq1[i], b = seq2[i];
+    if (a === "-" || b === "-") continue;
     aligned++;
-    if (seq1[i] === seq2[i]) identical++;
+    if (a === b) { identical++; similar++; }
+    else if (areSimilar(a.toUpperCase(), b.toUpperCase())) { similar++; }
   }
   return {
     identity: aligned > 0 ? identical / aligned : 0,
+    similarity: aligned > 0 ? similar / aligned : 0,
     identical_positions: identical,
+    similar_positions: similar,
     aligned_length: aligned,
   };
 }
