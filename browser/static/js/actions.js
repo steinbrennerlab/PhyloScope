@@ -1587,6 +1587,66 @@ async function exportPDF() {
   }
 }
 
+function buildInfoLines() {
+  const lines = [];
+  if (state.nwkName) lines.push(`Tree: ${state.nwkName}`);
+  if (state.aaName) lines.push(`Alignment: ${state.aaName}`);
+  if (state.numSpecies > 0) lines.push(`Species: ${state.numSpecies}`);
+  const tipCount = state.allTipNames.length;
+  if (tipCount > 0) lines.push(`Tips: ${tipCount}`);
+  lines.push(`Layout: ${state.layoutMode}${state.usePhylogram ? ", phylogram" : ", cladogram"}`);
+  if (state.hiddenTips.size > 0) lines.push(`Hidden tips: ${state.hiddenTips.size}`);
+  if (state.collapsedNodes.size > 0) lines.push(`Collapsed clades: ${state.collapsedNodes.size}`);
+  const labelCount = Object.keys(state.nodeLabels).length;
+  if (labelCount > 0) {
+    lines.push(`Clade labels: ${Object.values(state.nodeLabels).join(", ")}`);
+  }
+  if (state.motifList.length > 0) {
+    lines.push(`Motifs: ${state.motifList.map(m => m.pattern).join(", ")}`);
+  }
+  if (state.activeHeatmaps.length > 0) {
+    lines.push(`Heatmaps: ${state.activeHeatmaps.map(h => h.name).join(", ")}`);
+  }
+  const checkedSpecies = [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species);
+  if (checkedSpecies.length > 0) {
+    lines.push(`Highlighted species: ${checkedSpecies.join(", ")}`);
+  }
+  return lines;
+}
+
+async function exportPDFWithInfo() {
+  const resultEl = document.getElementById("export-viz-result");
+  try {
+    const { svgString, width, height } = buildExportSVGString();
+    const infoLines = buildInfoLines();
+    const infoHeight = infoLines.length * 14 + 20;
+    const totalHeight = height + infoHeight;
+    const { jsPDF } = window.jspdf;
+    const landscape = width > totalHeight;
+    const doc = new jsPDF({ orientation: landscape ? "landscape" : "portrait", unit: "pt", format: [width, totalHeight] });
+
+    // Draw info text at top
+    doc.setFontSize(9);
+    doc.setTextColor(80, 80, 80);
+    let y = 14;
+    for (const line of infoLines) {
+      doc.text(line, 10, y);
+      y += 14;
+    }
+
+    // Draw tree SVG below
+    const parser = new DOMParser();
+    const svgDoc = parser.parseFromString(svgString, "image/svg+xml");
+    await doc.svg(svgDoc.documentElement, { x: 0, y: infoHeight, width, height });
+    doc.save("phyloscope-tree-info.pdf");
+    resultEl.style.color = "#27ae60";
+    resultEl.textContent = "PDF with info downloaded.";
+  } catch (e) {
+    resultEl.style.color = "#c0392b";
+    resultEl.textContent = `PDF export failed: ${e.message}`;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // File selection handling
 // ---------------------------------------------------------------------------
@@ -1819,6 +1879,7 @@ function bindStartupControls() {
   document.getElementById("export-svg-btn").addEventListener("click", exportSVG);
   document.getElementById("export-png-btn").addEventListener("click", exportPNG);
   document.getElementById("export-pdf-btn").addEventListener("click", exportPDF);
+  document.getElementById("export-pdf-info-btn").addEventListener("click", exportPDFWithInfo);
   document.getElementById("export-btn").addEventListener("click", doExport);
   document.getElementById("export-newick-btn").addEventListener("click", exportNewick);
   document.getElementById("copy-newick-btn").addEventListener("click", copyNewick);
