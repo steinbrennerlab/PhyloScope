@@ -88,9 +88,11 @@
     <div><label><input type="checkbox" id="bootstrap-toggle"> Show bootstraps</label></div>
     <div><label><input type="checkbox" id="length-toggle"> Show sequence lengths</label></div>
     <div><label><input type="checkbox" id="fast-mode-toggle"> Fast mode (large trees)</label></div>
-    <div><label><input type="checkbox" id="uniform-triangles-toggle"> Uniform collapsed triangles</label></div>
-    <div class="row">
-      <label>Triangle size: <input type="range" id="triangle-size" min="10" max="500" value="100"></label>
+    <div id="triangle-controls" style="display:none;">
+      <div><label><input type="checkbox" id="uniform-triangles-toggle"> Uniform collapsed triangles</label></div>
+      <div class="row">
+        <label>Triangle size: <input type="range" id="triangle-size" min="10" max="500" value="100"></label>
+      </div>
     </div>
     <div class="row">
       <label>Tip spacing: <input type="range" id="tip-spacing" min="8" max="200" value="16"></label>

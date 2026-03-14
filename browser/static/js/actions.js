@@ -96,6 +96,10 @@ function getDefaultHeatmapColumns(columns) {
   return columns.length <= 8 ? [...columns] : columns.slice(0, 5);
 }
 
+function updateTriangleControls() {
+  document.getElementById("triangle-controls").style.display = state.collapsedNodes.size > 0 ? "" : "none";
+}
+
 function updateHeatmapStatus() {
   const status = document.getElementById("heatmap-status");
   if (state.activeHeatmaps.length === 0) {
@@ -756,6 +760,7 @@ function restoreState(snapshot) {
   buildLabelList();
   updateLabelInput();
   updateUndoRedoButtons();
+  updateTriangleControls();
   renderTree();
 }
 
@@ -795,6 +800,7 @@ function openSubtree(nodeId) {
   state.ty = 20;
   document.getElementById("subtree-bar").style.display = "";
   document.getElementById("sidebar-back-full-tree").style.display = "";
+  updateTriangleControls();
   renderTree();
 }
 
@@ -831,6 +837,7 @@ function rerootAt(nodeId) {
   document.getElementById("sidebar-back-full-tree").style.display = "none";
   document.getElementById("export-form").style.display = "none";
   document.getElementById("newick-form").style.display = "none";
+  updateTriangleControls();
   renderTree();
   setTooltip("Tree re-rooted");
 }
@@ -1515,6 +1522,7 @@ function applySessionSettings(session) {
   document.getElementById("fast-mode-toggle").checked = state.fastMode;
   document.getElementById("uniform-triangles-toggle").checked = state.uniformTriangles;
   document.getElementById("triangle-size").value = state.triangleScale;
+  updateTriangleControls();
   document.getElementById("tip-spacing").value = state.tipSpacing;
   document.getElementById("tip-label-size").value = state.tipLabelSize;
   document.getElementById("dot-size").value = state.dotSize;
@@ -1941,6 +1949,7 @@ function initAfterLoad() {
     state.treeData.ch.forEach(autoCollapse);
   }
 
+  updateTriangleControls();
   renderTree();
   loadTipDatalist();
   applyFastaState();
@@ -2221,6 +2230,7 @@ function onTreeClick(event) {
       state.collapsedNodes.add(numericId);
     }
     invalidateRenderCache();
+    updateTriangleControls();
     renderTree();
     return;
   }
