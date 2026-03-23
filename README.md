@@ -20,7 +20,7 @@ The frontend is organized as small ES modules under `src/static/js/`, bundled in
 | Shared node finding | Built-in species filter with exclusion | No | No | Scriptable | No |
 | Alignment export | Click-to-copy FASTA, subtree slicing, column ranges | No | No | Scriptable | No |
 | Click-to-copy | Tip FASTA + node aligned FASTA to clipboard | No | No | No | No |
-| Annotation | Species, bootstrap, motif highlights, sequence lengths, clade labels | Very rich (heatmaps, domains, bars) | Moderate | Very rich | Basic (colors, fonts, line widths) |
+| Annotation | Species, bootstrap, motif highlights, sequence lengths, clade labels, tip labels | Very rich (heatmaps, domains, bars) | Moderate | Very rich | Basic (colors, fonts, line widths) |
 | Large trees (10k+) | Fast mode: batched SVG, auto-collapse, render cache | Optimized for large trees | Moderate | Good | Optimized (magnifier tool) |
 | Undo/redo | Full undo/redo for tree operations | No | Limited | No | No |
 | Session persistence | Save/load all UI state + data to JSON | Server-side projects | Save to NEXUS | Scriptable | Save to file |
@@ -39,7 +39,7 @@ You can also serve it from any static file server (e.g. `python3 -m http.server 
 If you want to rebuild the bundle after modifying source files:
 
 ```bash
-cd browser
+cd src
 npm install    # one-time: installs esbuild
 npm run build  # bundles to docs/
 ```
@@ -97,9 +97,9 @@ An example dataset is provided in `example_data/`.
 - **Auto-collapse**: for trees >2000 tips, automatically collapses clades to show ~50 visible groups; shift-click to expand clades of interest
 
 ### Undo / Redo
-- Full undo/redo for tree operations: re-root, collapse/expand, subtree focus, restore full tree
+- Full undo/redo for tree operations, label changes, and display settings
 - **Keyboard shortcuts**: Ctrl+Z to undo, Ctrl+Shift+Z (or Ctrl+Y) to redo
-- Buttons in the Subtree Focus section; stack capped at 20 entries
+- Buttons in the sticky Loaded Data panel; stack capped at 20 entries
 
 ### Node Selection
 - **Click** an internal node to select it — the node appears as a larger black dot with a red ring
@@ -109,9 +109,21 @@ An example dataset is provided in `example_data/`.
 ### Clade Labels
 - Select a node, then type a label in the **Clade Labels** section to annotate it
 - Labels display as bold text next to the node dot on the tree (and on collapsed triangles)
+- **Color selector**: choose a color for each label (preset colors or custom hex)
+- **Click-to-navigate**: click a label in the sidebar list to pan the tree to that node
 - Labels are included in SVG/PNG/PDF exports
 - Labels persist across undo/redo and are saved/restored with sessions
 - Small "x" button to remove individual labels
+
+### Tip Labels (Markers)
+- Click a tip to select it, then assign a custom label in the **Tip Labels** section
+- Each label has a configurable **color** (preset or custom hex) and **icon** (dot, star, diamond, square, triangle)
+- **Batch upload**: upload a tab-delimited text file to label many tips at once
+  - If the file has a column header named `label`, the first column is used to match tip names and the `label` column provides the label text
+  - Otherwise, the first column is used as both the tip name and label text
+- **Click-to-navigate**: click a label in the sidebar list to pan the tree to that tip
+- **Inline rename**: click the rename button next to any label to edit it in place
+- Labels persist across undo/redo and are saved/restored with sessions
 
 ### Species Highlighting
 - Check species in the sidebar to color their tips (both labels and dots)
@@ -168,6 +180,8 @@ An example dataset is provided in `example_data/`.
 - Multiple dataset files can be loaded at the same time
 - Each loaded dataset keeps its own independent color scale computed across all numeric values in that dataset file
 - Missing or non-numeric values such as `na` and `#NUM!` display as neutral gray cells
+- **Color picker**: customize low, mid, and high colors for the heatmap gradient, with reset to defaults
+- **Threshold sliders**: adjust min, mid, and max thresholds to control the color scale mapping, with reset
 - Hover over any heatmap cell to see tip name, dataset name, column name, and exact raw value
 - Heatmaps are supported in **rectangular** and **circular** layouts
 - **Unrooted** layout does not render heatmaps
@@ -176,11 +190,13 @@ An example dataset is provided in `example_data/`.
 - **SVG**: download a standalone SVG with inlined styles (opens in any browser or Inkscape)
 - **PNG**: download a 2x resolution PNG for presentations and documents
 - **PDF**: download a vector PDF (uses jsPDF + svg2pdf.js, bundled locally); auto-detects landscape/portrait
+- **PDF + Info**: download a PDF with an appended info page showing loaded filenames, layout settings, species selections, motifs, and tree settings
 
 ### Alignment Export
 - **Click** an internal node to select it for export (also copies FASTA to clipboard)
 - Exports gapped FASTA for the subtree's sequences (in tree traversal order)
 - Warning shown when tips in the subtree are missing from the alignment
+- **Sequence preview**: when exporting a column range or reference positions, a preview of the selected sequences is shown
 - Options:
   - **Extra sequences**: add comma-separated tip names (validates they exist)
   - **Full alignment**: export all columns
