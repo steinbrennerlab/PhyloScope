@@ -67,7 +67,11 @@
   <div class="section" id="loaded-info-section" style="display:none;">
     <h3>Loaded Data</h3>
     <div id="loaded-info" class="loaded-info"></div>
-    <button id="reset-btn" class="btn" style="margin-top:4px;">Load different data</button>
+    <div class="row" style="margin-top:4px;">
+      <button id="reset-btn" class="btn" style="flex:1;">Load different data</button>
+      <button id="undo-btn" class="btn-sm" disabled>Undo</button>
+      <button id="redo-btn" class="btn-sm" disabled>Redo</button>
+    </div>
   </div>
 
   <div class="section">
@@ -103,10 +107,6 @@
     <h3>Subtree Focus</h3>
     <p class="hint" id="subtree-hint">Click: select node &amp; copy FASTA<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation<br>Ctrl+Shift+click: re-root at node</p>
     <button id="sidebar-back-full-tree" class="btn" style="display:none;">Back to full tree</button>
-    <div class="row" style="margin-top:6px;">
-      <button id="undo-btn" class="btn-sm" disabled>Undo</button>
-      <button id="redo-btn" class="btn-sm" disabled>Redo</button>
-    </div>
   </div>
 
   <div class="section">
