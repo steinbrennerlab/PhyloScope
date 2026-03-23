@@ -468,6 +468,7 @@ function buildLabelList() {
       iconSelect.appendChild(opt);
     }
     iconSelect.addEventListener("change", () => {
+      pushUndo();
       state.nodeLabelIcons[nodeId] = iconSelect.value;
       invalidateRenderCache();
       renderTree();
@@ -489,6 +490,7 @@ function buildLabelList() {
       input.select();
       const commit = () => {
         const newVal = input.value.trim();
+        if (newVal !== label) pushUndo();
         if (newVal) {
           state.nodeLabels[nodeId] = newVal;
         } else {
@@ -511,6 +513,7 @@ function buildLabelList() {
     removeBtn.className = "motif-remove";
     removeBtn.textContent = "\u00d7";
     removeBtn.addEventListener("click", () => {
+      pushUndo();
       delete state.nodeLabels[nodeId];
       delete state.nodeLabelIcons[nodeId];
       invalidateRenderCache();
@@ -730,6 +733,18 @@ function captureState() {
     hiddenTips: new Set(state.hiddenTips),
     nodeLabels: { ...state.nodeLabels },
     nodeLabelIcons: { ...state.nodeLabelIcons },
+    labelFontSize: state.labelFontSize,
+    layoutMode: state.layoutMode,
+    usePhylogram: state.usePhylogram,
+    showTipLabels: state.showTipLabels,
+    tipLabelSize: state.tipLabelSize,
+    dotSize: state.dotSize,
+    showBootstraps: state.showBootstraps,
+    showLengths: state.showLengths,
+    tipSpacing: state.tipSpacing,
+    triangleScale: state.triangleScale,
+    uniformTriangles: state.uniformTriangles,
+    fastMode: state.fastMode,
   };
 }
 
@@ -745,6 +760,19 @@ function restoreState(snapshot) {
   state.hiddenTips = snapshot.hiddenTips;
   state.nodeLabels = snapshot.nodeLabels;
   state.nodeLabelIcons = snapshot.nodeLabelIcons || {};
+  // Restore display settings (use fallback defaults for older snapshots)
+  state.labelFontSize = snapshot.labelFontSize ?? state.labelFontSize;
+  state.layoutMode = snapshot.layoutMode ?? state.layoutMode;
+  state.usePhylogram = snapshot.usePhylogram ?? state.usePhylogram;
+  state.showTipLabels = snapshot.showTipLabels ?? state.showTipLabels;
+  state.tipLabelSize = snapshot.tipLabelSize ?? state.tipLabelSize;
+  state.dotSize = snapshot.dotSize ?? state.dotSize;
+  state.showBootstraps = snapshot.showBootstraps ?? state.showBootstraps;
+  state.showLengths = snapshot.showLengths ?? state.showLengths;
+  state.tipSpacing = snapshot.tipSpacing ?? state.tipSpacing;
+  state.triangleScale = snapshot.triangleScale ?? state.triangleScale;
+  state.uniformTriangles = snapshot.uniformTriangles ?? state.uniformTriangles;
+  state.fastMode = snapshot.fastMode ?? state.fastMode;
   state.nodeById = {};
   state.parentMap = {};
   indexNodes(state.treeData);
@@ -755,6 +783,20 @@ function restoreState(snapshot) {
     document.getElementById("subtree-bar").style.display = "none";
     document.getElementById("sidebar-back-full-tree").style.display = "none";
   }
+  // Sync UI controls to restored state
+  document.getElementById("phylogram-toggle").checked = state.usePhylogram;
+  document.getElementById("tip-labels-toggle").checked = state.showTipLabels;
+  document.getElementById("tip-label-size").value = state.tipLabelSize;
+  document.getElementById("tip-spacing").value = state.tipSpacing;
+  document.getElementById("dot-size").value = state.dotSize;
+  document.getElementById("bootstrap-toggle").checked = state.showBootstraps;
+  document.getElementById("length-toggle").checked = state.showLengths;
+  document.getElementById("fast-mode-toggle").checked = state.fastMode;
+  document.getElementById("uniform-triangles-toggle").checked = state.uniformTriangles;
+  document.getElementById("triangle-size").value = state.triangleScale;
+  document.getElementById("label-font-size").value = state.labelFontSize;
+  const layoutRadio = document.querySelector(`input[name="layout"][value="${state.layoutMode}"]`);
+  if (layoutRadio) layoutRadio.checked = true;
   invalidateRenderCache();
   updateFilterBadge();
   buildLabelList();
@@ -1204,6 +1246,7 @@ function filterTipsByRegex() {
   if (!pattern) return;
   try {
     const re = new RegExp(pattern, "i");
+    pushUndo();
     let count = 0;
     collectAllTipNames(state.treeData).forEach(name => {
       if (re.test(name)) {
@@ -1226,6 +1269,7 @@ function filterTipsUncheckedSpecies() {
     document.getElementById("filter-result").textContent = "Check at least one species first";
     return;
   }
+  pushUndo();
   let count = 0;
   collectAllTipNames(state.treeData).forEach(name => {
     const species = state.tipToSpecies[name];
@@ -1241,6 +1285,8 @@ function filterTipsUncheckedSpecies() {
 }
 
 function showAllTips() {
+  if (state.hiddenTips.size === 0) return;
+  pushUndo();
   state.hiddenTips.clear();
   updateFilterBadge();
   invalidateRenderCache();
@@ -1251,6 +1297,7 @@ function showAllTips() {
 function setNodeLabel() {
   if (state.exportNodeId == null) return;
   const value = document.getElementById("node-label-input").value.trim();
+  pushUndo();
   if (value) {
     state.nodeLabels[state.exportNodeId] = value;
   } else {
@@ -2076,49 +2123,79 @@ function setupControls() {
   controlsBound = true;
 
   document.getElementById("phylogram-toggle").addEventListener("change", event => {
+    pushUndo();
     state.usePhylogram = event.target.checked;
     renderTree();
   });
-  document.getElementById("tip-spacing").addEventListener("input", event => {
+  // For sliders/number inputs: capture undo snapshot once before drag starts,
+  // pop it if the value didn't actually change on release
+  const sliderUndoOnce = el => {
+    let capturedValue = null;
+    el.addEventListener("pointerdown", () => {
+      capturedValue = el.value;
+      pushUndo();
+    });
+    el.addEventListener("pointerup", () => {
+      if (el.value === capturedValue) {
+        state.undoStack.pop();
+        updateUndoRedoButtons();
+      }
+    });
+  };
+  const tipSpacingEl = document.getElementById("tip-spacing");
+  sliderUndoOnce(tipSpacingEl);
+  tipSpacingEl.addEventListener("input", event => {
     state.tipSpacing = +event.target.value;
     renderTree();
   });
   document.getElementById("tip-labels-toggle").addEventListener("change", event => {
+    pushUndo();
     state.showTipLabels = event.target.checked;
     renderTree();
   });
-  document.getElementById("tip-label-size").addEventListener("input", event => {
+  const tipLabelSizeEl = document.getElementById("tip-label-size");
+  sliderUndoOnce(tipLabelSizeEl);
+  tipLabelSizeEl.addEventListener("input", event => {
     state.tipLabelSize = +event.target.value;
     renderTree();
   });
-  document.getElementById("dot-size").addEventListener("input", event => {
+  const dotSizeEl = document.getElementById("dot-size");
+  sliderUndoOnce(dotSizeEl);
+  dotSizeEl.addEventListener("input", event => {
     state.dotSize = +event.target.value;
     invalidateRenderCache();
     renderTree();
   });
   document.getElementById("bootstrap-toggle").addEventListener("change", event => {
+    pushUndo();
     state.showBootstraps = event.target.checked;
     renderTree();
   });
   document.getElementById("length-toggle").addEventListener("change", event => {
+    pushUndo();
     state.showLengths = event.target.checked;
     renderTree();
   });
   document.getElementById("fast-mode-toggle").addEventListener("change", event => {
+    pushUndo();
     state.fastMode = event.target.checked;
     invalidateRenderCache();
     renderTree();
   });
   document.getElementById("uniform-triangles-toggle").addEventListener("change", event => {
+    pushUndo();
     state.uniformTriangles = event.target.checked;
     renderTree();
   });
-  document.getElementById("triangle-size").addEventListener("input", event => {
+  const triangleSizeEl = document.getElementById("triangle-size");
+  sliderUndoOnce(triangleSizeEl);
+  triangleSizeEl.addEventListener("input", event => {
     state.triangleScale = +event.target.value;
     renderTree();
   });
   document.querySelectorAll('input[name="layout"]').forEach(radio => {
     radio.addEventListener("change", event => {
+      pushUndo();
       state.layoutMode = event.target.value;
       renderTree();
     });
@@ -2197,7 +2274,9 @@ function setupControls() {
   document.getElementById("node-label-input").addEventListener("keydown", event => {
     if (event.key === "Enter") setNodeLabel();
   });
-  document.getElementById("label-font-size").addEventListener("input", event => {
+  const labelFontSizeEl = document.getElementById("label-font-size");
+  sliderUndoOnce(labelFontSizeEl);
+  labelFontSizeEl.addEventListener("input", event => {
     state.labelFontSize = +event.target.value;
     invalidateRenderCache();
     renderTree();
