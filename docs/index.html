@@ -152,8 +152,21 @@
   <div class="section">
     <h3>Clade Labels</h3>
     <div id="label-input-container" style="display:none;">
-      <div class="row">
-        <input type="text" id="node-label-input" placeholder="Label for selected node">
+      <div class="row" style="flex-wrap:wrap;">
+        <input type="text" id="node-label-input" placeholder="Label for selected node" style="min-width:80px;">
+        <select id="node-label-color-select">
+          <option value="#333">Black</option>
+          <option value="#e22">Red</option>
+          <option value="#2563eb">Blue</option>
+          <option value="#16a34a">Green</option>
+          <option value="#ea580c">Orange</option>
+          <option value="#9333ea">Purple</option>
+          <option value="#0891b2">Teal</option>
+          <option value="#be185d">Pink</option>
+          <option value="#854d0e">Brown</option>
+          <option value="custom">Custom&hellip;</option>
+        </select>
+        <input type="color" id="node-label-color-custom" value="#333" style="display:none;width:28px;padding:0;border:1px solid #bbb;border-radius:3px;">
         <button id="set-label-btn" class="btn">Set</button>
       </div>
     </div>
