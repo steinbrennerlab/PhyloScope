@@ -27,7 +27,7 @@
         <span class="detected-tag detected-required">required</span>
       </div>
       <div class="detected-row">
-        <label class="detected-label">Alignment (.aa.fa):</label>
+        <label class="detected-label">Alignment (FASTA):</label>
         <select id="detected-aa" class="detected-select"></select>
         <span class="detected-tag detected-optional">optional</span>
       </div>
@@ -77,7 +77,8 @@
       <p>Required folder structure:</p>
       <pre>  your-folder/
     *.nwk                &mdash; Newick tree file (exactly one, required)
-    *.aa.fa              &mdash; Gapped protein alignment (optional)
+    *.aa.fa              &mdash; Preferred default protein alignment (optional)
+    *.fa / *.fasta       &mdash; Other protein alignment names also accepted
     orthofinder-input/   &mdash; Folder of per-species FASTA files (optional)
     dataset/             &mdash; Tab-delimited heatmap data (optional)</pre>
     </div>
@@ -151,8 +152,14 @@
       <button id="name-search" class="btn">Search</button>
     </div>
     <div id="name-result"></div>
+    <div id="name-match-controls" class="row" style="display:none;">
+      <button id="name-select-all" class="btn-sm">Select all matched</button>
+      <button id="name-clear-selection" class="btn-sm">Clear selection</button>
+      <span id="name-selected-count" class="hint">0 selected</span>
+    </div>
     <div id="name-matches-list" class="name-matches-list"></div>
     <div id="tip-label-input-container" style="display:none;">
+      <div id="tip-label-target-status" class="hint"></div>
       <div class="row" style="flex-wrap:wrap;">
         <input type="text" id="tip-label-input" placeholder="Label for selected tip" style="min-width:80px;">
         <select id="tip-label-icon-select" class="label-icon-select"></select>

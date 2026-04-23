@@ -54,7 +54,7 @@ On launch, a setup dialog lets you load your data:
 - **Choose Files**: select individual files if folder picking isn't available in your browser
 - **Load saved session**: restore a previously saved session file, which includes all data and UI state
 
-After selecting files, PhyloScope detects and categorizes them. Choose the tree and alignment files from the dropdowns if multiple are present, then click **Load**.
+After selecting files, PhyloScope detects and categorizes them. Choose the tree and alignment files from the dropdowns if multiple are present, then click **Load**. Alignment files can use any root-level FASTA filename; if a `*.aa.fa` file is present, it is selected by default.
 By default, species labels come from `orthofinder-input/*.fa` when present. You can switch the setup dialog to **Infer from tip labels**; the default inference rule uses the first two leading letters of each tip label, and you can override it with your own regex/replacement rule.
 
 ## Input Folder Structure
@@ -64,7 +64,8 @@ Point PhyloScope at any folder containing:
 | File | Description |
 |------|-------------|
 | `*.nwk` | Newick tree (exactly one, required) |
-| `*.aa.fa` | Gapped protein alignment (optional) |
+| `*.aa.fa` | Preferred default gapped protein alignment filename (optional) |
+| `*.fa` / `*.fasta` | Other root-level protein alignment filenames also accepted (optional) |
 | `orthofinder-input/*.fa` | Per-species FASTA files for tip-to-species mapping when using the orthofinder species source (optional) |
 | `dataset/*.txt` | Tab-delimited tip datasets for rectangular heatmap display (optional) |
 
@@ -135,6 +136,7 @@ An example dataset is provided in `example_data/`.
 ### Name Search
 - Regex search against tip names (case-insensitive)
 - Matched tips highlighted in blue on the tree
+- Search results can be checkbox-selected in bulk, then labeled/recolored/re-shaped together from the tip label controls
 - Clickable results list — click a match to:
   - Highlight it with a large red circle on the tree (visible even inside collapsed clades)
   - Pan the view to center on the tip

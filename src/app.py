@@ -136,6 +136,40 @@ def parse_fasta(path):
     return {k: "".join(v) for k, v in seqs.items()}
 
 
+def is_alignment_candidate_name(name):
+    lower = name.lower()
+    return lower.endswith(".fa") or lower.endswith(".fasta")
+
+
+def is_preferred_alignment_name(name):
+    return name.lower().endswith(".aa.fa")
+
+
+def list_alignment_files(input_dir):
+    """Return root-level FASTA files sorted with *.aa.fa first."""
+    return sorted(
+        (f for f in input_dir.iterdir() if f.is_file() and is_alignment_candidate_name(f.name)),
+        key=lambda f: (0 if is_preferred_alignment_name(f.name) else 1, f.name.lower()),
+    )
+
+
+def autodetect_alignment_file(input_dir):
+    """Choose a default alignment file, preferring *.aa.fa when present."""
+    preferred_files = [f for f in list_alignment_files(input_dir) if is_preferred_alignment_name(f.name)]
+    if len(preferred_files) > 1:
+        return None, f"Multiple *.aa.fa files found in {input_dir}: {[f.name for f in preferred_files]}"
+    if len(preferred_files) == 1:
+        return preferred_files[0], None
+
+    alignment_files = list_alignment_files(input_dir)
+    if len(alignment_files) > 1:
+        return None, (
+            f"Multiple alignment FASTA files found in {input_dir}: "
+            f"{[f.name for f in alignment_files]}"
+        )
+    return (alignment_files[0] if alignment_files else None), None
+
+
 # ---------------------------------------------------------------------------
 # Species mapping from orthofinder-input
 # ---------------------------------------------------------------------------
@@ -429,10 +463,9 @@ def load_data(input_dir_str, nwk_file=None, aa_file=None):
         if aa_path and not aa_path.is_file():
             return False, f"Alignment file not found: {aa_path}"
     else:
-        aa_files = list(input_dir.glob("*.aa.fa"))
-        if len(aa_files) > 1:
-            return False, f"Multiple *.aa.fa files found in {input_dir}: {[f.name for f in aa_files]}"
-        aa_path = aa_files[0] if aa_files else None
+        aa_path, aa_error = autodetect_alignment_file(input_dir)
+        if aa_error:
+            return False, aa_error
 
     nwk_file = nwk_path  # rename for rest of function
     aa_file = aa_path
@@ -455,7 +488,7 @@ def load_data(input_dir_str, nwk_file=None, aa_file=None):
         protein_seqs = parse_fasta(str(aa_file))
         protein_seqs_ungapped = {k: v.replace("-", "") for k, v in protein_seqs.items()}
     else:
-        print("No *.aa.fa found, skipping alignment.")
+        print("No alignment FASTA found, skipping alignment.")
         protein_seqs, protein_seqs_ungapped = None, None
 
     # Species mapping (optional — skip if orthofinder-input/ missing)
@@ -690,7 +723,7 @@ async def api_browse(path: Optional[str] = Query(None)):
         return JSONResponse(status_code=403, content={"error": f"Permission denied: {browse_path}"})
 
     has_nwk = any(browse_path.glob("*.nwk"))
-    has_aa_fa = any(browse_path.glob("*.aa.fa"))
+    has_alignment = any(is_alignment_candidate_name(f.name) for f in browse_path.iterdir() if f.is_file())
 
     parent = str(browse_path.parent) if browse_path.parent != browse_path else None
 
@@ -699,7 +732,8 @@ async def api_browse(path: Optional[str] = Query(None)):
         "parent": parent,
         "dirs": dirs,
         "has_nwk": has_nwk,
-        "has_aa_fa": has_aa_fa,
+        "has_aa_fa": has_alignment,
+        "has_alignment": has_alignment,
     }
 
 
@@ -722,7 +756,7 @@ async def api_browse_files(path: str = Query(..., description="Directory to scan
         return JSONResponse(status_code=400, content={"error": f"Not a directory: {p}"})
 
     nwk_files = sorted(f.name for f in p.glob("*.nwk"))
-    aa_files = sorted(f.name for f in p.glob("*.aa.fa"))
+    aa_files = [f.name for f in list_alignment_files(p)]
     has_ortho = (p / "orthofinder-input").is_dir()
     dataset_files = list_dataset_files(p)
 

@@ -12,6 +12,28 @@ import {
   DEFAULT_SPECIES_INFER_REPLACEMENT,
 } from "./tree-ops.js";
 
+function isFastaFileName(name) {
+  const lower = name.toLowerCase();
+  return lower.endsWith(".fa") || lower.endsWith(".fasta");
+}
+
+function isPreferredAlignmentFileName(name) {
+  return name.toLowerCase().endsWith(".aa.fa");
+}
+
+function compareAlignmentFiles(a, b) {
+  const aPriority = isPreferredAlignmentFileName(a.name) ? 0 : 1;
+  const bPriority = isPreferredAlignmentFileName(b.name) ? 0 : 1;
+  if (aPriority !== bPriority) return aPriority - bPriority;
+  return a.name.localeCompare(b.name);
+}
+
+function isSameSelectedFile(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.name === b.name && (a.webkitRelativePath || "") === (b.webkitRelativePath || "");
+}
+
 function normalizeSpeciesConfig(speciesConfig = {}) {
   return {
     mode: speciesConfig.mode === "tip-labels" ? "tip-labels" : "orthofinder",
@@ -51,7 +73,7 @@ export function detectFiles(files) {
 
     if (hasRelativePaths) {
       if (relPath.includes("orthofinder-input/") || relPath.includes("orthofinder-input\\")) {
-        if (name.endsWith(".fa") || name.endsWith(".fasta")) {
+        if (isFastaFileName(name)) {
           orthoFiles.push(file);
         }
         continue;
@@ -66,20 +88,19 @@ export function detectFiles(files) {
 
     if (name.endsWith(".nwk")) {
       nwkFiles.push(file);
-    } else if (name.endsWith(".aa.fa")) {
+    } else if (isFastaFileName(name)) {
       aaFiles.push(file);
-    } else if (!hasRelativePaths) {
-      if ((name.endsWith(".fa") || name.endsWith(".fasta")) && !name.endsWith(".aa.fa")) {
+      if (!hasRelativePaths) {
         orthoFiles.push(file);
-      } else if (name.endsWith(".txt") && !name.endsWith(":Zone.Identifier")) {
-        datasetFiles.push(file);
       }
+    } else if (!hasRelativePaths && name.endsWith(".txt") && !name.endsWith(":Zone.Identifier")) {
+      datasetFiles.push(file);
     }
   }
 
   return {
     nwkFiles: nwkFiles.sort((a, b) => a.name.localeCompare(b.name)),
-    aaFiles: aaFiles.sort((a, b) => a.name.localeCompare(b.name)),
+    aaFiles: aaFiles.sort(compareAlignmentFiles),
     orthoFiles: orthoFiles.sort((a, b) => a.name.localeCompare(b.name)),
     datasetFiles: datasetFiles.sort((a, b) => a.name.localeCompare(b.name)),
   };
@@ -100,8 +121,9 @@ export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles,
 
   const nwkText = await nwkFile.text();
   const aaText = aaFile ? await aaFile.text() : null;
-  const orthoTexts = orthoFiles
-    ? await Promise.all(orthoFiles.map(async f => ({ name: f.name, text: await f.text() })))
+  const filteredOrthoFiles = (orthoFiles || []).filter(f => !isSameSelectedFile(f, aaFile));
+  const orthoTexts = filteredOrthoFiles.length > 0
+    ? await Promise.all(filteredOrthoFiles.map(async f => ({ name: f.name, text: await f.text() })))
     : [];
   const datasetTexts = await Promise.all(
     (datasetFiles || []).map(async f => ({ name: f.name, text: await f.text() }))

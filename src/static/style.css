@@ -86,6 +86,13 @@ input[type=text] { flex: 1; }
 .name-match-item { padding: 2px 4px; cursor: pointer; color: #2563eb; border-radius: 2px; }
 .name-match-item:hover { background: #e8f0fe; }
 .name-match-item.name-match-active { background: #fde8e8; color: #e22; font-weight: bold; }
+.name-match-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 2px; }
+.name-match-row:hover { background: #f4f7fb; }
+.name-match-row.name-match-selected { background: #e8f0fe; }
+.name-match-checkbox { margin: 0; flex-shrink: 0; }
+.name-match-tip { color: #2563eb; cursor: pointer; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name-match-tip:hover { text-decoration: underline; }
+.name-match-tip.name-match-active { color: #e22; font-weight: bold; }
 
 /* Tip label entries */
 .tip-label-entry { display: flex; align-items: center; gap: 4px; padding: 2px 0; font-size: 12px; }

@@ -42,6 +42,9 @@ function clearUiForReset() {
   document.getElementById("motif-list").innerHTML = "";
   document.getElementById("name-result").textContent = "";
   document.getElementById("name-matches-list").innerHTML = "";
+  document.getElementById("name-match-controls").style.display = "none";
+  document.getElementById("name-selected-count").textContent = "0 selected";
+  document.getElementById("tip-label-input-container").style.display = "none";
   document.getElementById("name-input").value = "";
   document.getElementById("motif-result").textContent = "";
   document.getElementById("shared-result").textContent = "";
@@ -51,6 +54,7 @@ function clearUiForReset() {
   document.getElementById("heatmap-panels").innerHTML = "";
   document.getElementById("export-form").style.display = "none";
   document.getElementById("newick-form").style.display = "none";
+  document.getElementById("tip-label-target-status").textContent = "";
   updateSubtreeModeUi();
   document.getElementById("fast-mode-toggle").checked = false;
 }
@@ -631,46 +635,118 @@ function buildLabelList() {
 // Tip markers (persistent tip labels with color & symbol)
 // ---------------------------------------------------------------------------
 
+const MIXED_CONTROL_VALUE = "__mixed__";
+
+function ensureTipLabelIconOptions() {
+  const iconSel = document.getElementById("tip-label-icon-select");
+  if (iconSel.options.length > 0) return iconSel;
+  for (const icon of LABEL_ICONS) {
+    const opt = document.createElement("option");
+    opt.value = icon.id;
+    opt.textContent = icon.label;
+    iconSel.appendChild(opt);
+  }
+  return iconSel;
+}
+
+function removeMixedOption(selectEl) {
+  const mixedOption = selectEl.querySelector(`option[value="${MIXED_CONTROL_VALUE}"]`);
+  if (mixedOption) mixedOption.remove();
+}
+
+function setMixedOption(selectEl, label) {
+  removeMixedOption(selectEl);
+  const mixedOption = document.createElement("option");
+  mixedOption.value = MIXED_CONTROL_VALUE;
+  mixedOption.textContent = label;
+  selectEl.prepend(mixedOption);
+  selectEl.value = MIXED_CONTROL_VALUE;
+}
+
+function getTipLabelTargets() {
+  if (state.selectedNameTips.size > 0) return [...state.selectedNameTips];
+  return state.selectedTip ? [state.selectedTip] : [];
+}
+
+function getTipMarkerValue(tipName, key) {
+  const marker = state.tipMarkers[tipName] || {};
+  if (key === "text") return marker.text || "";
+  if (key === "color") return marker.color || "#e22";
+  return marker.icon || "dot";
+}
+
+function getSharedTipMarkerValue(targets, key) {
+  if (targets.length === 0) return null;
+  const first = getTipMarkerValue(targets[0], key);
+  return targets.every(tipName => getTipMarkerValue(tipName, key) === first) ? first : null;
+}
+
 function updateTipLabelInput() {
   const container = document.getElementById("tip-label-input-container");
-  if (!state.selectedTip) {
-    container.style.display = "none";
-    return;
-  }
-  container.style.display = "";
-  const existing = state.tipMarkers[state.selectedTip];
-  document.getElementById("tip-label-input").value = existing ? existing.text || "" : "";
+  const statusEl = document.getElementById("tip-label-target-status");
+  const textInput = document.getElementById("tip-label-input");
   const colorSel = document.getElementById("tip-label-color-select");
   const colorCustom = document.getElementById("tip-label-color-custom");
-  if (existing && existing.color) {
-    const presetOpt = [...colorSel.options].find(o => o.value === existing.color);
+  const iconSel = ensureTipLabelIconOptions();
+  const setBtn = document.getElementById("set-tip-label-btn");
+  const targets = getTipLabelTargets();
+  const bulkMode = state.selectedNameTips.size > 0;
+
+  if (targets.length === 0) {
+    container.style.display = "none";
+    statusEl.textContent = "";
+    setBtn.textContent = "Set";
+    return;
+  }
+
+  container.style.display = "";
+
+  statusEl.textContent = bulkMode
+    ? `Applying to ${targets.length} selected search result${targets.length === 1 ? "" : "s"}`
+    : `Selected tip: ${targets[0]}`;
+  setBtn.textContent = bulkMode ? "Apply to selected" : "Set";
+
+  const sharedText = bulkMode ? getSharedTipMarkerValue(targets, "text") : getTipMarkerValue(targets[0], "text");
+  if (bulkMode && sharedText === null) {
+    textInput.value = "";
+    textInput.placeholder = "Mixed labels";
+    textInput.dataset.mixed = "true";
+  } else {
+    textInput.value = sharedText || "";
+    textInput.placeholder = bulkMode ? "Label for selected tips" : "Label for selected tip";
+    textInput.dataset.mixed = "false";
+  }
+  textInput.dataset.edited = "false";
+
+  const sharedColor = bulkMode ? getSharedTipMarkerValue(targets, "color") : getTipMarkerValue(targets[0], "color");
+  if (bulkMode && sharedColor === null) {
+    setMixedOption(colorSel, "Mixed colors");
+    colorCustom.style.display = "none";
+  } else {
+    removeMixedOption(colorSel);
+    const presetOpt = [...colorSel.options].find(o => o.value === sharedColor);
     if (presetOpt) {
-      colorSel.value = existing.color;
+      colorSel.value = sharedColor;
       colorCustom.style.display = "none";
     } else {
       colorSel.value = "custom";
-      colorCustom.value = existing.color;
+      colorCustom.value = sharedColor || "#e22";
       colorCustom.style.display = "";
     }
+  }
+
+  const sharedIcon = bulkMode ? getSharedTipMarkerValue(targets, "icon") : getTipMarkerValue(targets[0], "icon");
+  if (bulkMode && sharedIcon === null) {
+    setMixedOption(iconSel, "Mixed shapes");
   } else {
-    colorSel.value = "#e22";
-    colorCustom.style.display = "none";
+    removeMixedOption(iconSel);
+    iconSel.value = sharedIcon || "dot";
   }
-  // Populate icon select
-  const iconSel = document.getElementById("tip-label-icon-select");
-  if (iconSel.options.length === 0) {
-    for (const icon of LABEL_ICONS) {
-      const opt = document.createElement("option");
-      opt.value = icon.id;
-      opt.textContent = icon.label;
-      iconSel.appendChild(opt);
-    }
-  }
-  iconSel.value = existing && existing.icon ? existing.icon : "dot";
 }
 
 function getTipLabelColor() {
   const sel = document.getElementById("tip-label-color-select");
+  if (sel.value === MIXED_CONTROL_VALUE) return null;
   return sel.value === "custom" ? document.getElementById("tip-label-color-custom").value : sel.value;
 }
 
@@ -711,20 +787,36 @@ function handleTipLabelsUpload(file) {
     invalidateRenderCache();
     renderTree();
     buildTipLabelList();
+    updateTipLabelInput();
   };
   reader.readAsText(file);
 }
 
 function setTipLabel() {
-  if (!state.selectedTip) return;
+  const targets = getTipLabelTargets();
+  if (targets.length === 0) return;
   pushUndo();
-  const text = document.getElementById("tip-label-input").value.trim();
+  const textInput = document.getElementById("tip-label-input");
+  const text = textInput.value.trim();
   const color = getTipLabelColor();
-  const icon = document.getElementById("tip-label-icon-select").value;
-  state.tipMarkers[state.selectedTip] = { text, color, icon };
+  const iconSel = document.getElementById("tip-label-icon-select");
+  const icon = iconSel.value === MIXED_CONTROL_VALUE ? null : iconSel.value;
+  const preserveMixedText = state.selectedNameTips.size > 0
+    && textInput.dataset.mixed === "true"
+    && textInput.dataset.edited !== "true";
+
+  targets.forEach(tipName => {
+    const existing = state.tipMarkers[tipName] || {};
+    state.tipMarkers[tipName] = {
+      text: preserveMixedText ? (existing.text || "") : text,
+      color: color == null ? (existing.color || "#e22") : color,
+      icon: icon == null ? (existing.icon || "dot") : icon,
+    };
+  });
   invalidateRenderCache();
   renderTree();
   buildTipLabelList();
+  updateTipLabelInput();
 }
 
 function buildTipLabelList() {
@@ -751,6 +843,7 @@ function buildTipLabelList() {
         swatch.style.background = picker.value;
         invalidateRenderCache();
         renderTree();
+        updateTipLabelInput();
       });
       picker.addEventListener("change", () => picker.remove());
       picker.click();
@@ -771,6 +864,7 @@ function buildTipLabelList() {
       marker.icon = iconSelect.value;
       invalidateRenderCache();
       renderTree();
+      updateTipLabelInput();
     });
 
     // Label text — click to pan to tip
@@ -802,6 +896,7 @@ function buildTipLabelList() {
         invalidateRenderCache();
         renderTree();
         buildTipLabelList();
+        updateTipLabelInput();
       };
       input.addEventListener("blur", commit);
       input.addEventListener("keydown", e => {
@@ -820,6 +915,7 @@ function buildTipLabelList() {
       invalidateRenderCache();
       renderTree();
       buildTipLabelList();
+      updateTipLabelInput();
     });
 
     row.append(swatch, iconSelect, text, renameBtn, removeBtn);
@@ -1057,6 +1153,7 @@ function restoreState(snapshot) {
   state.collapsedNodes = snapshot.collapsedNodes;
   state.exportNodeId = snapshot.exportNodeId;
   state.selectedTip = snapshot.selectedTip;
+  state.selectedNameTips = new Set();
   state.fullTreeData = snapshot.fullTreeData;
   state.scale = snapshot.scale;
   state.tx = snapshot.tx;
@@ -1390,13 +1487,75 @@ function updateExportPreview() {
 // Search (unchanged or local)
 // ---------------------------------------------------------------------------
 
+function updateNameMatchControls(matchCount = state.nameMatches.size) {
+  const controlsEl = document.getElementById("name-match-controls");
+  const selectedCountEl = document.getElementById("name-selected-count");
+  const selectedCount = state.selectedNameTips.size;
+
+  controlsEl.style.display = matchCount > 0 ? "" : "none";
+  selectedCountEl.textContent = `${selectedCount} selected`;
+  document.getElementById("name-select-all").disabled = matchCount === 0 || selectedCount === matchCount;
+  document.getElementById("name-clear-selection").disabled = selectedCount === 0;
+  updateTipLabelInput();
+}
+
+function renderNameMatchesList(matched) {
+  const listEl = document.getElementById("name-matches-list");
+  listEl.innerHTML = "";
+
+  matched.forEach(tipName => {
+    const row = document.createElement("div");
+    row.className = "name-match-row";
+    if (state.selectedNameTips.has(tipName)) row.classList.add("name-match-selected");
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "name-match-checkbox";
+    checkbox.checked = state.selectedNameTips.has(tipName);
+    checkbox.addEventListener("change", () => toggleNameTipSelection(tipName, checkbox.checked));
+
+    const label = document.createElement("span");
+    label.className = "name-match-tip";
+    label.textContent = tipName;
+    if (tipName === state.selectedTip) label.classList.add("name-match-active");
+    label.addEventListener("click", () => selectNameTip(tipName));
+
+    row.append(checkbox, label);
+    listEl.appendChild(row);
+  });
+
+  updateNameMatchControls(matched.length);
+}
+
+function toggleNameTipSelection(tipName, checked) {
+  if (checked) {
+    state.selectedNameTips.add(tipName);
+  } else {
+    state.selectedNameTips.delete(tipName);
+  }
+  renderNameMatchesList(Array.from(state.nameMatches));
+}
+
+function selectAllNameMatches() {
+  state.selectedNameTips = new Set(state.nameMatches);
+  renderNameMatchesList(Array.from(state.nameMatches));
+}
+
+function clearSelectedNameTips() {
+  state.selectedNameTips = new Set();
+  renderNameMatchesList(Array.from(state.nameMatches));
+}
+
 function searchName() {
   const query = document.getElementById("name-input").value.trim();
   const listEl = document.getElementById("name-matches-list");
   if (!query) {
+    document.getElementById("name-result").textContent = "";
     state.nameMatches = new Set();
+    state.selectedNameTips = new Set();
     state.selectedTip = null;
     listEl.innerHTML = "";
+    updateNameMatchControls(0);
     renderTree();
     return;
   }
@@ -1404,20 +1563,16 @@ function searchName() {
     const re = new RegExp(query, "i");
     const matched = collectAllTipNames(state.treeData).filter(name => re.test(name));
     state.nameMatches = new Set(matched);
+    state.selectedNameTips = new Set([...state.selectedNameTips].filter(name => state.nameMatches.has(name)));
+    if (state.selectedTip && !state.nameMatches.has(state.selectedTip)) state.selectedTip = null;
     document.getElementById("name-result").textContent = `${state.nameMatches.size} tips matched`;
-    listEl.innerHTML = "";
-    matched.forEach(tipName => {
-      const item = document.createElement("div");
-      item.className = "name-match-item";
-      item.textContent = tipName;
-      if (tipName === state.selectedTip) item.classList.add("name-match-active");
-      item.addEventListener("click", () => selectNameTip(tipName));
-      listEl.appendChild(item);
-    });
+    renderNameMatchesList(matched);
   } catch (e) {
     document.getElementById("name-result").textContent = `Invalid regex: ${e.message}`;
     state.nameMatches = new Set();
+    state.selectedNameTips = new Set();
     listEl.innerHTML = "";
+    updateNameMatchControls(0);
   }
   renderTree();
 }
@@ -1425,11 +1580,8 @@ function searchName() {
 function selectNameTip(tipName) {
   state.selectedTip = tipName;
   document.getElementById("name-result").textContent = `${state.nameMatches.size} tips matched`;
+  renderNameMatchesList(Array.from(state.nameMatches));
   copyTipName(tipName);
-  document.querySelectorAll(".name-match-item").forEach(el => {
-    el.classList.toggle("name-match-active", el.textContent === tipName);
-  });
-  updateTipLabelInput();
   invalidateRenderCache();
   renderTree();
   const ring = dom.group.querySelector(".selected-tip-ring");
@@ -1909,6 +2061,7 @@ function applySessionSettings(session) {
   state.labelFontSize = session.labelFontSize ?? 10;
   state.exportNodeId = session.exportNodeId ?? null;
   state.selectedTip = session.selectedTip ?? null;
+  state.selectedNameTips = new Set();
   state.hiddenTips = new Set(session.hiddenTips || []);
   state.layoutMode = session.layoutMode || "rectangular";
   state.usePhylogram = session.usePhylogram ?? true;
@@ -2540,6 +2693,8 @@ function setupControls() {
   document.getElementById("name-input").addEventListener("keydown", event => {
     if (event.key === "Enter") searchName();
   });
+  document.getElementById("name-select-all").addEventListener("click", selectAllNameMatches);
+  document.getElementById("name-clear-selection").addEventListener("click", clearSelectedNameTips);
   document.getElementById("motif-search").addEventListener("click", searchMotif);
   document.getElementById("motif-input").addEventListener("keydown", event => {
     if (event.key === "Enter") searchMotif();
@@ -2606,6 +2761,9 @@ function setupControls() {
   document.getElementById("tip-label-input").addEventListener("keydown", event => {
     if (event.key === "Enter") setTipLabel();
   });
+  document.getElementById("tip-label-input").addEventListener("input", () => {
+    document.getElementById("tip-label-input").dataset.edited = "true";
+  });
   const tipLabelsFileInput = document.getElementById("tip-labels-file");
   document.getElementById("upload-tip-labels-btn").addEventListener("click", () => tipLabelsFileInput.click());
   tipLabelsFileInput.addEventListener("change", () => {
@@ -2613,8 +2771,16 @@ function setupControls() {
     tipLabelsFileInput.value = "";
   });
   document.getElementById("tip-label-color-select").addEventListener("change", event => {
+    const nextValue = event.target.value;
+    removeMixedOption(event.target);
+    if (nextValue !== MIXED_CONTROL_VALUE) event.target.value = nextValue;
     const custom = document.getElementById("tip-label-color-custom");
-    custom.style.display = event.target.value === "custom" ? "" : "none";
+    custom.style.display = nextValue === "custom" ? "" : "none";
+  });
+  document.getElementById("tip-label-icon-select").addEventListener("change", event => {
+    const nextValue = event.target.value;
+    removeMixedOption(event.target);
+    if (nextValue !== MIXED_CONTROL_VALUE) event.target.value = nextValue;
   });
   document.getElementById("node-label-color-select").addEventListener("change", event => {
     const custom = document.getElementById("node-label-color-custom");

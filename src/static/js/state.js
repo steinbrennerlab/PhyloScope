@@ -39,6 +39,7 @@ export const state = {
   selectedTip: null,
   exportNodeId: null,
   nameMatches: new Set(),
+  selectedNameTips: new Set(),
   motifMatches: new Set(),
   sharedNodes: new Set(),
   motifList: [],
@@ -162,6 +163,7 @@ export function resetClientState() {
   state.selectedTip = null;
   state.exportNodeId = null;
   state.nameMatches = new Set();
+  state.selectedNameTips = new Set();
   state.motifMatches = new Set();
   state.sharedNodes = new Set();
   state.motifList = [];
