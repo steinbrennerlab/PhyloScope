@@ -98,6 +98,11 @@ export const dom = {
   detectedNwkSelect: document.getElementById("detected-nwk"),
   detectedAaSelect: document.getElementById("detected-aa"),
   detectedOrthoSpan: document.getElementById("detected-ortho"),
+  speciesSourceSelect: document.getElementById("species-source-select"),
+  speciesInferPanel: document.getElementById("species-infer-panel"),
+  speciesInferPattern: document.getElementById("species-infer-pattern"),
+  speciesInferReplacement: document.getElementById("species-infer-replacement"),
+  speciesSourceHint: document.getElementById("species-source-hint"),
   detectedDatasetSpan: document.getElementById("detected-datasets"),
   setupLoadRow: document.getElementById("setup-load-row"),
 };

@@ -4,7 +4,31 @@
  */
 
 import { parseNewick, parseFastaText } from "./parsers.js";
-import { annotateSpecies, buildSpeciesMapFromFiles } from "./tree-ops.js";
+import {
+  annotateSpecies,
+  buildSpeciesMapFromFiles,
+  buildSpeciesMapFromTipLabels,
+  DEFAULT_SPECIES_INFER_PATTERN,
+  DEFAULT_SPECIES_INFER_REPLACEMENT,
+} from "./tree-ops.js";
+
+function normalizeSpeciesConfig(speciesConfig = {}) {
+  return {
+    mode: speciesConfig.mode === "tip-labels" ? "tip-labels" : "orthofinder",
+    pattern: speciesConfig.pattern || DEFAULT_SPECIES_INFER_PATTERN,
+    replacement: speciesConfig.replacement ?? DEFAULT_SPECIES_INFER_REPLACEMENT,
+  };
+}
+
+function resolveSpeciesMapping(treeData, orthoTexts, speciesConfig) {
+  if (speciesConfig.mode === "tip-labels") {
+    return buildSpeciesMapFromTipLabels(treeData, speciesConfig);
+  }
+  if (orthoTexts.length > 0) {
+    return buildSpeciesMapFromFiles(treeData, orthoTexts);
+  }
+  return { speciesToTips: {}, tipToSpecies: {} };
+}
 
 /**
  * Detect relevant files from a FileList/array of File objects.
@@ -68,9 +92,10 @@ export function detectFiles(files) {
  * @param {File|null} opts.aaFile - The protein alignment file (optional).
  * @param {File[]} opts.orthoFiles - Orthofinder species FASTA files.
  * @param {File[]} opts.datasetFiles - Dataset .txt files.
+ * @param {{mode?: string, pattern?: string, replacement?: string}} opts.speciesConfig
  * @returns {Promise<{ success: boolean, error?: string, result?: object }>}
  */
-export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles }) {
+export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles, speciesConfig }) {
   if (!nwkFile) return { success: false, error: "No tree file (.nwk) selected." };
 
   const nwkText = await nwkFile.text();
@@ -84,6 +109,7 @@ export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles 
 
   const treeData = parseNewick(nwkText);
   const gene = nwkFile.name.replace(/\.nwk$/, "");
+  const resolvedSpeciesConfig = normalizeSpeciesConfig(speciesConfig);
 
   let proteinSeqs = null;
   let proteinSeqsUngapped = null;
@@ -97,10 +123,14 @@ export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles 
 
   let speciesToTips = {};
   let tipToSpecies = {};
-  if (orthoTexts.length > 0) {
-    const mapping = buildSpeciesMapFromFiles(treeData, orthoTexts);
+  try {
+    const mapping = resolveSpeciesMapping(treeData, orthoTexts, resolvedSpeciesConfig);
     speciesToTips = mapping.speciesToTips;
     tipToSpecies = mapping.tipToSpecies;
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+  if (Object.keys(tipToSpecies).length > 0) {
     annotateSpecies(treeData, tipToSpecies);
   }
 
@@ -133,6 +163,7 @@ export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles 
         nwkName: nwkFile.name,
         aa: aaText,
         aaName: aaFile ? aaFile.name : null,
+        speciesConfig: resolvedSpeciesConfig,
         ortho: orthoTexts,
         datasets: datasetTexts,
       },
@@ -149,6 +180,7 @@ export function loadFromSourceTexts(sourceTexts) {
   const aaText = sourceTexts.aa;
   const orthoTexts = sourceTexts.ortho || [];
   const datasetTexts = sourceTexts.datasets || [];
+  const resolvedSpeciesConfig = normalizeSpeciesConfig(sourceTexts.speciesConfig);
 
   const treeData = parseNewick(nwkText);
   const gene = (sourceTexts.nwkName || "tree.nwk").replace(/\.nwk$/, "");
@@ -165,10 +197,11 @@ export function loadFromSourceTexts(sourceTexts) {
 
   let speciesToTips = {};
   let tipToSpecies = {};
-  if (orthoTexts.length > 0) {
-    const mapping = buildSpeciesMapFromFiles(treeData, orthoTexts);
-    speciesToTips = mapping.speciesToTips;
-    tipToSpecies = mapping.tipToSpecies;
+  const mapping = resolveSpeciesMapping(treeData, orthoTexts, resolvedSpeciesConfig);
+  speciesToTips = mapping.speciesToTips;
+  tipToSpecies = mapping.tipToSpecies;
+  if (Object.keys(tipToSpecies).length > 0) {
+    annotateSpecies(treeData, tipToSpecies);
   }
 
   const hasFasta = proteinSeqs !== null;

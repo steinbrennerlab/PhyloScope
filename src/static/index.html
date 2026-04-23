@@ -36,6 +36,32 @@
         <span id="detected-ortho" class="detected-status">&mdash;</span>
       </div>
       <div class="detected-row">
+        <label class="detected-label" for="species-source-select">Species labels:</label>
+        <select id="species-source-select" class="detected-select">
+          <option value="orthofinder">Use orthofinder-input FASTA files</option>
+          <option value="tip-labels">Infer from tip labels</option>
+        </select>
+      </div>
+      <div id="species-infer-panel" class="setup-subpanel" style="display:none;">
+        <label class="setup-field-label" for="species-infer-pattern">Tip label regex</label>
+        <input
+          type="text"
+          id="species-infer-pattern"
+          value="^([A-Za-z]{2}).*$"
+          spellcheck="false"
+        >
+        <label class="setup-field-label" for="species-infer-replacement">Species label replacement</label>
+        <input
+          type="text"
+          id="species-infer-replacement"
+          value="$1"
+          spellcheck="false"
+        >
+        <div id="species-source-hint" class="setup-inline-hint">
+          Regex is applied to the full tip label. Use capture groups with a replacement like <code>$1</code>.
+        </div>
+      </div>
+      <div class="detected-row">
         <label class="detected-label">Datasets:</label>
         <span id="detected-datasets" class="detected-status">&mdash;</span>
       </div>

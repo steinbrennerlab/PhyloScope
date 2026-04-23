@@ -1,0 +1,5 @@
+taxa	other_data	label
+Shelov_YS99.v1.contig_44_pilon.g157380.t1	2341	label1
+Maxil_YS73.v1.contig_103_pilon.g000160.t1	34	23123
+stuff	23
+stuff2		dfas

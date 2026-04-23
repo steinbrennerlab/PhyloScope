@@ -55,6 +55,7 @@ On launch, a setup dialog lets you load your data:
 - **Load saved session**: restore a previously saved session file, which includes all data and UI state
 
 After selecting files, PhyloScope detects and categorizes them. Choose the tree and alignment files from the dropdowns if multiple are present, then click **Load**.
+By default, species labels come from `orthofinder-input/*.fa` when present. You can switch the setup dialog to **Infer from tip labels**; the default inference rule uses the first two leading letters of each tip label, and you can override it with your own regex/replacement rule.
 
 ## Input Folder Structure
 
@@ -64,7 +65,7 @@ Point PhyloScope at any folder containing:
 |------|-------------|
 | `*.nwk` | Newick tree (exactly one, required) |
 | `*.aa.fa` | Gapped protein alignment (optional) |
-| `orthofinder-input/*.fa` | Per-species FASTA files for tip-to-species mapping (optional) |
+| `orthofinder-input/*.fa` | Per-species FASTA files for tip-to-species mapping when using the orthofinder species source (optional) |
 | `dataset/*.txt` | Tab-delimited tip datasets for rectangular heatmap display (optional) |
 
 An example dataset is provided in `example_data/`.

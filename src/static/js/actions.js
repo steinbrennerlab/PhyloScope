@@ -18,6 +18,8 @@ import {
   annotateSpecies,
   buildExportFasta,
   computePairwiseIdentity,
+  DEFAULT_SPECIES_INFER_PATTERN,
+  DEFAULT_SPECIES_INFER_REPLACEMENT,
   findNodesWithSpecies,
   nodeToNewick,
   refPosToColumns,
@@ -49,8 +51,7 @@ function clearUiForReset() {
   document.getElementById("heatmap-panels").innerHTML = "";
   document.getElementById("export-form").style.display = "none";
   document.getElementById("newick-form").style.display = "none";
-  document.getElementById("subtree-bar").style.display = "none";
-  document.getElementById("sidebar-back-full-tree").style.display = "none";
+  updateSubtreeModeUi();
   document.getElementById("fast-mode-toggle").checked = false;
 }
 
@@ -80,6 +81,70 @@ function rebuildMotifMatches() {
 function updateUndoRedoButtons() {
   document.getElementById("undo-btn").disabled = state.undoStack.length === 0;
   document.getElementById("redo-btn").disabled = state.redoStack.length === 0;
+}
+
+function updateSubtreeModeUi() {
+  const subtreeBar = document.getElementById("subtree-bar");
+  const sidebarBackFullTree = document.getElementById("sidebar-back-full-tree");
+  let subtreeBarLabel = document.getElementById("subtree-bar-label");
+
+  if (!subtreeBarLabel) {
+    const backFullTreeButton = document.getElementById("back-full-tree");
+    subtreeBar.textContent = "";
+    subtreeBarLabel = document.createElement("span");
+    subtreeBarLabel.id = "subtree-bar-label";
+    subtreeBar.appendChild(subtreeBarLabel);
+    subtreeBar.appendChild(document.createTextNode(" \u00b7 "));
+    subtreeBar.appendChild(backFullTreeButton);
+  }
+
+  if (!state.fullTreeData) {
+    subtreeBar.style.display = "none";
+    subtreeBarLabel.textContent = "Viewing subtree";
+    sidebarBackFullTree.style.display = "none";
+    return;
+  }
+
+  const tipCount = state.treeData ? countAllTips(state.treeData) : 0;
+  subtreeBarLabel.textContent = `Viewing subtree (${tipCount} tips)`;
+  subtreeBar.style.display = "";
+  sidebarBackFullTree.style.display = "";
+}
+
+function getSourceSpeciesConfig() {
+  const speciesConfig = state.sourceTexts?.speciesConfig || {};
+  return {
+    mode: speciesConfig.mode === "tip-labels" ? "tip-labels" : "orthofinder",
+    pattern: speciesConfig.pattern || DEFAULT_SPECIES_INFER_PATTERN,
+    replacement: speciesConfig.replacement ?? DEFAULT_SPECIES_INFER_REPLACEMENT,
+  };
+}
+
+function getSpeciesSourceLabel(speciesConfig = getSourceSpeciesConfig()) {
+  return speciesConfig.mode === "tip-labels" ? "tip labels (regex)" : "orthofinder-input FASTA files";
+}
+
+function updateSpeciesSourceSetupUi() {
+  const inferFromTips = dom.speciesSourceSelect.value === "tip-labels";
+  dom.speciesInferPanel.style.display = inferFromTips ? "" : "none";
+
+  if (inferFromTips) {
+    dom.speciesSourceHint.innerHTML = 'Default rule takes the first two leading letters of each tip label. Override it with your own regex and a replacement like <code>$1</code>.';
+    return;
+  }
+
+  const orthoCount = state.stagedFiles?.detected?.orthoFiles?.length || 0;
+  dom.speciesSourceHint.textContent = orthoCount > 0
+    ? "Cross-reference tree tips against orthofinder-input FASTA headers."
+    : "No orthofinder species files detected. Load will continue without species labels unless you switch to tip-label inference.";
+}
+
+function getSetupSpeciesConfig() {
+  return {
+    mode: dom.speciesSourceSelect.value === "tip-labels" ? "tip-labels" : "orthofinder",
+    pattern: dom.speciesInferPattern.value.trim() || DEFAULT_SPECIES_INFER_PATTERN,
+    replacement: dom.speciesInferReplacement.value || DEFAULT_SPECIES_INFER_REPLACEMENT,
+  };
 }
 
 function updateFilterBadge() {
@@ -948,6 +1013,7 @@ function showLoadedInfo(totalTips) {
   } else {
     lines.push(`<span class="loaded-label">Species:</span> <span class="loaded-none">none</span>`);
   }
+  lines.push(`<span class="loaded-label">Species source:</span> <span class="loaded-value">${getSpeciesSourceLabel()}</span>`);
   lines.push(`<span class="loaded-label">Datasets:</span> <span class="loaded-value">${state.datasetFiles.length}</span>`);
   el.innerHTML = lines.join("<br>");
 }
@@ -1016,13 +1082,7 @@ function restoreState(snapshot) {
   state.nodeById = {};
   state.parentMap = {};
   indexNodes(state.treeData);
-  if (state.fullTreeData) {
-    document.getElementById("subtree-bar").style.display = "";
-    document.getElementById("sidebar-back-full-tree").style.display = "";
-  } else {
-    document.getElementById("subtree-bar").style.display = "none";
-    document.getElementById("sidebar-back-full-tree").style.display = "none";
-  }
+  updateSubtreeModeUi();
   // Sync UI controls to restored state
   document.getElementById("phylogram-toggle").checked = state.usePhylogram;
   document.getElementById("tip-labels-toggle").checked = state.showTipLabels;
@@ -1082,8 +1142,7 @@ function openSubtree(nodeId) {
   state.scale = 1;
   state.tx = 20;
   state.ty = 20;
-  document.getElementById("subtree-bar").style.display = "";
-  document.getElementById("sidebar-back-full-tree").style.display = "";
+  updateSubtreeModeUi();
   updateTriangleControls();
   renderTree();
 }
@@ -1117,8 +1176,7 @@ function rerootAt(nodeId) {
   state.scale = 1;
   state.tx = 20;
   state.ty = 20;
-  document.getElementById("subtree-bar").style.display = "none";
-  document.getElementById("sidebar-back-full-tree").style.display = "none";
+  updateSubtreeModeUi();
   document.getElementById("export-form").style.display = "none";
   document.getElementById("newick-form").style.display = "none";
   updateTriangleControls();
@@ -1136,8 +1194,7 @@ function restoreFullTree() {
   state.scale = 1;
   state.tx = 20;
   state.ty = 20;
-  document.getElementById("subtree-bar").style.display = "none";
-  document.getElementById("sidebar-back-full-tree").style.display = "none";
+  updateSubtreeModeUi();
   renderTree();
 }
 
@@ -1779,10 +1836,7 @@ async function loadSessionV2(session, fromSetup) {
     }
   }
 
-  if (state.fullTreeData) {
-    document.getElementById("subtree-bar").style.display = "";
-    document.getElementById("sidebar-back-full-tree").style.display = "";
-  }
+  updateSubtreeModeUi();
 
   updateFilterBadge();
   buildLabelList();
@@ -2072,9 +2126,14 @@ async function exportPDF() {
 
 function buildInfoLines() {
   const lines = [];
+  const speciesConfig = getSourceSpeciesConfig();
   if (state.nwkName) lines.push(`Tree: ${state.nwkName}`);
   if (state.aaName) lines.push(`Alignment: ${state.aaName}`);
   if (state.numSpecies > 0) lines.push(`Species: ${state.numSpecies}`);
+  lines.push(`Species source: ${getSpeciesSourceLabel(speciesConfig)}`);
+  if (speciesConfig.mode === "tip-labels") {
+    lines.push(`Species rule: ${speciesConfig.pattern} -> ${speciesConfig.replacement}`);
+  }
   const tipCount = state.allTipNames.length;
   if (tipCount > 0) lines.push(`Tips: ${tipCount}`);
   lines.push(`Layout: ${state.layoutMode}${state.usePhylogram ? ", phylogram" : ", cladogram"}`);
@@ -2188,6 +2247,8 @@ function handleFilesSelected(files) {
     ? `${detected.datasetFiles.length} file${detected.datasetFiles.length === 1 ? "" : "s"} found`
     : "none found";
   dom.detectedDatasetSpan.style.color = detected.datasetFiles.length > 0 ? "#27ae60" : "#888";
+
+  updateSpeciesSourceSetupUi();
 }
 
 // ---------------------------------------------------------------------------
@@ -2203,6 +2264,7 @@ async function doSetupLoad() {
   const detected = state.stagedFiles.detected;
   const nwkName = dom.detectedNwkSelect.value;
   const aaName = dom.detectedAaSelect.value;
+  const speciesConfig = getSetupSpeciesConfig();
 
   if (!nwkName) {
     dom.setupError.textContent = "No tree file (.nwk) found. Please select a folder containing a .nwk file.";
@@ -2222,6 +2284,7 @@ async function doSetupLoad() {
       aaFile: aaFile || null,
       orthoFiles: detected.orthoFiles,
       datasetFiles: detected.datasetFiles,
+      speciesConfig,
     });
 
     if (!loadResult.success) {
@@ -2323,6 +2386,7 @@ function showSetup() {
   dom.detectedFilesPanel.style.display = "none";
   dom.setupLoadRow.style.display = "none";
   state.stagedFiles = null;
+  updateSpeciesSourceSetupUi();
 }
 
 function hideSetup() {
@@ -2357,6 +2421,7 @@ function bindStartupControls() {
       handleFilesSelected(dom.filePicker.files);
     }
   });
+  dom.speciesSourceSelect.addEventListener("change", updateSpeciesSourceSetupUi);
 
   document.getElementById("setup-load-session").addEventListener("click", () => loadSession(true));
   dom.setupLoadBtn.addEventListener("click", doSetupLoad);
@@ -2670,7 +2735,9 @@ function onTreeHover(event) {
     return;
   }
   if (el.dataset?.nodeid == null) return;
-  let text = `Node #${el.dataset.nodeid}`;
+  const node = state.nodeById[Number(el.dataset.nodeid)];
+  const tipCount = node ? countAllTips(node) : 0;
+  let text = `Node #${el.dataset.nodeid}\nTips: ${tipCount}`;
   if (el.dataset.support != null) text += `\nSupport: ${el.dataset.support}`;
   text += state.hasFasta ? "\nClick: select & copy FASTA" : "\nClick: select node";
   text += "\nShift+click: collapse/expand\nCtrl+click: view subtree";

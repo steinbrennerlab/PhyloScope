@@ -5,6 +5,17 @@
 
 import { collectAllTipNames } from "./tree-utils.js";
 
+export const DEFAULT_SPECIES_INFER_PATTERN = "^([A-Za-z]{2}).*$";
+export const DEFAULT_SPECIES_INFER_REPLACEMENT = "$1";
+
+function compileSpeciesInferencePattern(pattern) {
+  try {
+    return new RegExp(pattern);
+  } catch (error) {
+    throw new Error(`Invalid species inference regex: ${error.message}`);
+  }
+}
+
 /**
  * Convert a tree node to Newick string (no trailing semicolon).
  */
@@ -110,6 +121,41 @@ export function buildSpeciesMapFromFiles(treeData, orthoFiles) {
         tipToSpecies[tip] = species;
       }
     }
+  }
+
+  return { speciesToTips, tipToSpecies };
+}
+
+/**
+ * Build species-to-tips and tip-to-species maps by applying a regex rule to tip labels.
+ * The regex is expected to match the full tip label; the replacement becomes the species label.
+ * @param {object} treeData - Tree root node.
+ * @param {{pattern?: string, replacement?: string}} options
+ * @returns {{ speciesToTips: object, tipToSpecies: object }}
+ */
+export function buildSpeciesMapFromTipLabels(treeData, options = {}) {
+  const pattern = options.pattern || DEFAULT_SPECIES_INFER_PATTERN;
+  const replacement = options.replacement ?? DEFAULT_SPECIES_INFER_REPLACEMENT;
+  const speciesRegex = compileSpeciesInferencePattern(pattern);
+
+  const speciesToTips = {};
+  const tipToSpecies = {};
+
+  for (const tip of collectAllTipNames(treeData).sort()) {
+    speciesRegex.lastIndex = 0;
+    if (!speciesRegex.test(tip)) continue;
+
+    speciesRegex.lastIndex = 0;
+    const species = tip.replace(speciesRegex, replacement).trim();
+    if (!species) continue;
+
+    if (!speciesToTips[species]) speciesToTips[species] = [];
+    speciesToTips[species].push(tip);
+    tipToSpecies[tip] = species;
+  }
+
+  for (const tips of Object.values(speciesToTips)) {
+    tips.sort();
   }
 
   return { speciesToTips, tipToSpecies };
