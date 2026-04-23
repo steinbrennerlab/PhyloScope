@@ -1008,16 +1008,27 @@ function buildSpeciesList(speciesList) {
     return;
   }
   speciesList.forEach(species => {
+    const row = document.createElement("div");
+    row.className = "species-entry";
     const label = document.createElement("label");
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.dataset.species = species;
     cb.addEventListener("change", renderTree);
-    const swatch = document.createElement("span");
-    swatch.className = "sp-swatch";
-    swatch.style.background = state.speciesColors[species];
-    label.append(cb, swatch, ` ${species}`);
-    container.appendChild(label);
+    const text = document.createElement("span");
+    text.textContent = species;
+
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.className = "species-color-input";
+    colorInput.value = state.speciesColors[species];
+    colorInput.dataset.speciesColor = species;
+    colorInput.title = `Color for ${species}`;
+    colorInput.addEventListener("change", () => setSpeciesColor(species, colorInput.value));
+
+    label.append(cb, text);
+    row.append(label, colorInput);
+    container.appendChild(row);
   });
 }
 
@@ -1031,10 +1042,33 @@ function buildExcludeSpeciesList(speciesList) {
     cb.dataset.excludeSpecies = species;
     const swatch = document.createElement("span");
     swatch.className = "sp-swatch";
+    swatch.dataset.speciesColor = species;
     swatch.style.background = state.speciesColors[species];
     label.append(cb, swatch, ` ${species}`);
     container.appendChild(label);
   });
+}
+
+function updateSpeciesColorWidgets(species = null) {
+  document.querySelectorAll("[data-species-color]").forEach(el => {
+    if (species && el.dataset.speciesColor !== species) return;
+    const color = state.speciesColors[el.dataset.speciesColor];
+    if (!color) return;
+    if (el.tagName === "INPUT") {
+      el.value = color;
+    } else {
+      el.style.background = color;
+    }
+  });
+}
+
+function setSpeciesColor(species, color) {
+  if (!species || !color || state.speciesColors[species] === color) return;
+  pushUndo();
+  state.speciesColors[species] = color;
+  updateSpeciesColorWidgets(species);
+  invalidateRenderCache();
+  renderTree();
 }
 
 function applyFastaState() {
@@ -1124,6 +1158,7 @@ function captureState() {
     collapsedNodes: new Set(state.collapsedNodes),
     exportNodeId: state.exportNodeId,
     selectedTip: state.selectedTip,
+    speciesColors: { ...state.speciesColors },
     fullTreeData: state.fullTreeData ? deepCopyNode(state.fullTreeData) : null,
     scale: state.scale,
     tx: state.tx,
@@ -1154,6 +1189,7 @@ function restoreState(snapshot) {
   state.exportNodeId = snapshot.exportNodeId;
   state.selectedTip = snapshot.selectedTip;
   state.selectedNameTips = new Set();
+  state.speciesColors = snapshot.speciesColors || state.speciesColors;
   state.fullTreeData = snapshot.fullTreeData;
   state.scale = snapshot.scale;
   state.tx = snapshot.tx;
@@ -1194,6 +1230,7 @@ function restoreState(snapshot) {
   document.getElementById("label-font-size").value = state.labelFontSize;
   const layoutRadio = document.querySelector(`input[name="layout"][value="${state.layoutMode}"]`);
   if (layoutRadio) layoutRadio.checked = true;
+  updateSpeciesColorWidgets();
   invalidateRenderCache();
   updateFilterBadge();
   buildLabelList();
@@ -1648,7 +1685,7 @@ function searchMotif() {
 // ---------------------------------------------------------------------------
 
 function highlightSharedNodes() {
-  const checked = [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species);
+  const checked = [...document.querySelectorAll('#species-list input[data-species]:checked')].map(cb => cb.dataset.species);
   const listEl = document.getElementById("shared-nodes-list");
   if (checked.length === 0) {
     document.getElementById("shared-result").textContent = "Select at least one species";
@@ -1721,7 +1758,7 @@ function filterTipsByRegex() {
 }
 
 function filterTipsUncheckedSpecies() {
-  const checked = new Set([...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species));
+  const checked = new Set([...document.querySelectorAll('#species-list input[data-species]:checked')].map(cb => cb.dataset.species));
   if (checked.size === 0) {
     document.getElementById("filter-result").textContent = "Check at least one species first";
     return;
@@ -1834,10 +1871,11 @@ function saveSession() {
     nodeLabelIcons: state.nodeLabelIcons,
     nodeLabelColors: state.nodeLabelColors,
     tipMarkers: state.tipMarkers,
+    speciesColors: state.speciesColors,
     labelFontSize: state.labelFontSize,
     exportNodeId: state.exportNodeId,
     selectedTip: state.selectedTip,
-    checkedSpecies: [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species),
+    checkedSpecies: [...document.querySelectorAll('#species-list input[data-species]:checked')].map(cb => cb.dataset.species),
     excludedSpecies: [...document.querySelectorAll("#exclude-species-list input:checked")].map(cb => cb.dataset.excludeSpecies),
     motifList: state.motifList.map(motif => ({ pattern: motif.pattern, type: motif.type })),
     nameSearch: document.getElementById("name-input").value,
@@ -2058,6 +2096,7 @@ function applySessionSettings(session) {
   state.nodeLabelIcons = session.nodeLabelIcons || {};
   state.nodeLabelColors = session.nodeLabelColors || {};
   state.tipMarkers = session.tipMarkers || {};
+  state.speciesColors = session.speciesColors || state.speciesColors;
   state.labelFontSize = session.labelFontSize ?? 10;
   state.exportNodeId = session.exportNodeId ?? null;
   state.selectedTip = session.selectedTip ?? null;
@@ -2093,7 +2132,7 @@ function applySessionSettings(session) {
 
   if (session.checkedSpecies) {
     const checkSet = new Set(session.checkedSpecies);
-    document.querySelectorAll("#species-list input").forEach(cb => {
+    document.querySelectorAll('#species-list input[data-species]').forEach(cb => {
       cb.checked = checkSet.has(cb.dataset.species);
     });
   }
@@ -2108,6 +2147,7 @@ function applySessionSettings(session) {
     document.getElementById("name-input").value = session.nameSearch;
     searchName();
   }
+  updateSpeciesColorWidgets();
 }
 
 // ---------------------------------------------------------------------------
@@ -2302,7 +2342,7 @@ function buildInfoLines() {
   if (state.activeHeatmaps.length > 0) {
     lines.push(`Heatmaps: ${state.activeHeatmaps.map(h => h.name).join(", ")}`);
   }
-  const checkedSpecies = [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species);
+  const checkedSpecies = [...document.querySelectorAll('#species-list input[data-species]:checked')].map(cb => cb.dataset.species);
   if (checkedSpecies.length > 0) {
     lines.push(`Highlighted species: ${checkedSpecies.join(", ")}`);
   }
@@ -2682,11 +2722,11 @@ function setupControls() {
     });
   });
   document.getElementById("select-all-species").addEventListener("click", () => {
-    document.querySelectorAll("#species-list input").forEach(cb => { cb.checked = true; });
+    document.querySelectorAll('#species-list input[data-species]').forEach(cb => { cb.checked = true; });
     renderTree();
   });
   document.getElementById("select-none-species").addEventListener("click", () => {
-    document.querySelectorAll("#species-list input").forEach(cb => { cb.checked = false; });
+    document.querySelectorAll('#species-list input[data-species]').forEach(cb => { cb.checked = false; });
     renderTree();
   });
   document.getElementById("name-search").addEventListener("click", searchName);

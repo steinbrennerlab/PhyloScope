@@ -59,6 +59,7 @@ function getRenderCacheKey(checkedSpecies) {
     [...state.sharedNodes].sort().join(","),
     state.exportNodeId,
     state.selectedTip,
+    JSON.stringify(state.speciesColors),
     state.showTipLabels,
     state.tipLabelSize,
     state.dotSize,
@@ -90,7 +91,7 @@ export function renderTree() {
   if (!state.treeData) return;
 
   const checkedSpecies = new Set(
-    [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species)
+    [...document.querySelectorAll('#species-list input[data-species]:checked')].map(cb => cb.dataset.species)
   );
 
   const allowFastMode = state.fastMode && !(

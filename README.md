@@ -129,6 +129,7 @@ An example dataset is provided in `example_data/`.
 
 ### Species Highlighting
 - Check species in the sidebar to color their tips (both labels and dots)
+- Each species row includes a color picker for overriding its highlight color
 - Species count badges appear next to each species name when a node is selected
 - Colors persist even when tip labels are hidden
 - 40-color palette auto-assigned to species
