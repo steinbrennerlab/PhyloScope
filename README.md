@@ -56,6 +56,7 @@ On launch, a setup dialog lets you load your data:
 
 After selecting files, PhyloScope detects and categorizes them. Choose the tree and alignment files from the dropdowns if multiple are present, then click **Load**. Alignment files can use any root-level FASTA filename; if a `*.aa.fa` file is present, it is selected by default.
 By default, species labels come from `orthofinder-input/*.fa` when present. You can switch the setup dialog to **Infer from tip labels**; the default inference rule uses the first two leading letters of each tip label, and you can override it with your own regex/replacement rule.
+An optional experimental JSON file can also be selected at load time. If you use the folder picker, JSON files can live in subfolders and are shown by relative path in the setup dialog. When present, PhyloScope matches each `slow_leaves` / `fast_leaves` tip set exactly against descendant clades in the currently open tree view and highlights the matching nodes.
 
 ## Input Folder Structure
 
@@ -66,6 +67,7 @@ Point PhyloScope at any folder containing:
 | `*.nwk` | Newick tree (exactly one, required) |
 | `*.aa.fa` | Preferred default gapped protein alignment filename (optional) |
 | `*.fa` / `*.fasta` | Other root-level protein alignment filenames also accepted (optional) |
+| `*.json` | Optional experimental rate-shift split file with `splits[].slow_leaves` / `splits[].fast_leaves`; can be in a subfolder when using the folder picker (optional) |
 | `orthofinder-input/*.fa` | Per-species FASTA files for tip-to-species mapping when using the orthofinder species source (optional) |
 | `dataset/*.txt` | Tab-delimited tip datasets for rectangular heatmap display (optional) |
 
@@ -133,6 +135,13 @@ An example dataset is provided in `example_data/`.
 - Species count badges appear next to each species name when a node is selected
 - Colors persist even when tip labels are hidden
 - 40-color palette auto-assigned to species
+
+### Experimental Analysis
+- Optional load-time import of a root-level JSON file containing split leaf sets
+- Exact clade matching uses descendant tip labels rather than parser node numbers, so highlights survive reloads and current-tree reindexing
+- Matching nodes are highlighted on the tree and listed in the sidebar with clickable entries
+- Match counts update for the currently open tree view, including subtree mode
+- `Label matched clades` imports labels like `split_0022 slow` onto the matched nodes using the standard clade-label system
 
 ### Name Search
 - Regex search against tip names (case-insensitive)

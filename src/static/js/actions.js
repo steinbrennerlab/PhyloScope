@@ -29,6 +29,7 @@ import { detectFiles, loadFromFiles, loadFromSourceTexts } from "./file-loader.j
 
 let controlsBound = false;
 let startupBound = false;
+const CLADE_SIGNATURE_SEPARATOR = "\u001f";
 
 // ---------------------------------------------------------------------------
 // UI helpers (unchanged)
@@ -49,6 +50,11 @@ function clearUiForReset() {
   document.getElementById("motif-result").textContent = "";
   document.getElementById("shared-result").textContent = "";
   document.getElementById("shared-nodes-list").innerHTML = "";
+  document.getElementById("experimental-analysis-section").style.display = "none";
+  document.getElementById("experimental-analysis-result").textContent = "";
+  document.getElementById("experimental-analysis-label-result").textContent = "";
+  document.getElementById("experimental-label-btn").disabled = true;
+  document.getElementById("experimental-analysis-list").innerHTML = "";
   document.getElementById("heatmap-dataset-select").innerHTML = '<option value="">Select dataset</option>';
   document.getElementById("heatmap-status").textContent = "No dataset loaded";
   document.getElementById("heatmap-panels").innerHTML = "";
@@ -113,6 +119,242 @@ function updateSubtreeModeUi() {
   subtreeBarLabel.textContent = `Viewing subtree (${tipCount} tips)`;
   subtreeBar.style.display = "";
   sidebarBackFullTree.style.display = "";
+}
+
+function buildCladeSignature(leaves) {
+  return leaves.join(CLADE_SIGNATURE_SEPARATOR);
+}
+
+function getFilePickerKey(file) {
+  return String(file?.webkitRelativePath || file?.name || "").replace(/\\/g, "/");
+}
+
+function mergeSortedLeafNames(left, right) {
+  if (left.length === 0) return right.slice();
+  if (right.length === 0) return left.slice();
+  const merged = [];
+  let li = 0;
+  let ri = 0;
+  while (li < left.length && ri < right.length) {
+    if (left[li] <= right[ri]) {
+      merged.push(left[li]);
+      li++;
+    } else {
+      merged.push(right[ri]);
+      ri++;
+    }
+  }
+  while (li < left.length) {
+    merged.push(left[li]);
+    li++;
+  }
+  while (ri < right.length) {
+    merged.push(right[ri]);
+    ri++;
+  }
+  return merged;
+}
+
+function buildExperimentalNodeIndex(root) {
+  const signatureToNodes = new Map();
+
+  function walk(node) {
+    let leaves;
+    if (!node.ch || node.ch.length === 0) {
+      leaves = [node.name];
+    } else {
+      leaves = [];
+      node.ch.forEach(child => {
+        leaves = mergeSortedLeafNames(leaves, walk(child));
+      });
+    }
+    const signature = buildCladeSignature(leaves);
+    const nodes = signatureToNodes.get(signature) || [];
+    nodes.push({
+      nodeId: node.id,
+      tipCount: leaves.length,
+      support: node.sup ?? null,
+    });
+    signatureToNodes.set(signature, nodes);
+    return leaves;
+  }
+
+  walk(root);
+  return signatureToNodes;
+}
+
+function getActiveNodeId() {
+  return state.exportNodeId != null && state.nodeById[state.exportNodeId] ? state.exportNodeId : null;
+}
+
+function syncNodeListActiveStates() {
+  const activeNodeId = getActiveNodeId();
+  document.querySelectorAll("#shared-nodes-list .name-match-item, #experimental-analysis-list .name-match-item").forEach(el => {
+    el.classList.toggle("name-match-active", parseInt(el.dataset.nodeid, 10) === activeNodeId);
+  });
+}
+
+function centerSelectedNodeInView() {
+  const targetNodeId = getActiveNodeId();
+  if (targetNodeId == null) return;
+
+  const centerAttempt = attemptsLeft => {
+    requestAnimationFrame(() => {
+      const target = dom.group.querySelector(".selected-node-ring")
+        || dom.group.querySelector(`[data-nodeid="${targetNodeId}"]`);
+      if (!target) {
+        if (attemptsLeft > 0) centerAttempt(attemptsLeft - 1);
+        return;
+      }
+      const cxAttr = target.getAttribute("cx");
+      const cyAttr = target.getAttribute("cy");
+      if (cxAttr == null || cyAttr == null) return;
+      const cx = parseFloat(cxAttr);
+      const cy = parseFloat(cyAttr);
+      const rect = dom.svg.getBoundingClientRect();
+      state.tx = rect.width / 2 - cx * state.scale;
+      state.ty = rect.height / 2 - cy * state.scale;
+      applyTransform();
+    });
+  };
+
+  centerAttempt(1);
+}
+
+function expandCollapsedPathToNode(nodeId) {
+  const collapsedPath = [];
+  let current = state.nodeById[nodeId];
+  while (current) {
+    if (state.collapsedNodes.has(current.id)) {
+      collapsedPath.push(current.id);
+    }
+    current = state.parentMap[current.id];
+  }
+  if (collapsedPath.length === 0) return false;
+  pushUndo();
+  collapsedPath.forEach(collapsedNodeId => {
+    state.collapsedNodes.delete(collapsedNodeId);
+  });
+  invalidateRenderCache();
+  updateTriangleControls();
+  return true;
+}
+
+function selectNode(nodeId, { center = false, expandCollapsedPath = false } = {}) {
+  if (expandCollapsedPath) {
+    expandCollapsedPathToNode(nodeId);
+  }
+  openExportPanel(nodeId);
+  if (state.hasFasta) copyNodeFasta(nodeId);
+  if (center) centerSelectedNodeInView();
+}
+
+function getExperimentalSummary() {
+  if (!state.experimentalAnalysis) return null;
+  return `${state.experimentalAnalysis.name} (${state.experimentalMatches.length}/${state.experimentalAnalysis.cladeCount} exact clades matched)`;
+}
+
+function updateExperimentalAnalysisUi() {
+  const section = document.getElementById("experimental-analysis-section");
+  const resultEl = document.getElementById("experimental-analysis-result");
+  const labelResultEl = document.getElementById("experimental-analysis-label-result");
+  const labelBtn = document.getElementById("experimental-label-btn");
+  const listEl = document.getElementById("experimental-analysis-list");
+  const analysis = state.experimentalAnalysis;
+
+  if (!analysis) {
+    section.style.display = "none";
+    resultEl.textContent = "";
+    labelResultEl.textContent = "";
+    labelBtn.disabled = true;
+    listEl.innerHTML = "";
+    return;
+  }
+
+  section.style.display = "";
+  listEl.innerHTML = "";
+  const matched = state.experimentalMatches.length;
+  const unmatched = Math.max(analysis.cladeCount - matched, 0);
+  resultEl.textContent = `${analysis.name}: ${matched}/${analysis.cladeCount} clades matched exactly in the current tree view${unmatched > 0 ? ` (${unmatched} unmatched)` : ""}`;
+  labelBtn.disabled = matched === 0;
+
+  if (matched === 0) {
+    const empty = document.createElement("div");
+    empty.className = "hint";
+    empty.textContent = "No exact clade matches found in the current tree view.";
+    listEl.appendChild(empty);
+    syncNodeListActiveStates();
+    return;
+  }
+
+  state.experimentalMatches.forEach(match => {
+    const item = document.createElement("div");
+    item.className = "name-match-item";
+    item.dataset.nodeid = match.nodeId;
+    item.dataset.experimentalKey = match.key;
+    item.textContent = `${match.splitId} ${match.side} - Node #${match.nodeId} - ${match.tipCount} tips`;
+    item.addEventListener("click", () => selectExperimentalNode(match.nodeId));
+    listEl.appendChild(item);
+  });
+  syncNodeListActiveStates();
+}
+
+function labelExperimentalClades() {
+  if (state.experimentalMatches.length === 0) {
+    document.getElementById("experimental-analysis-label-result").textContent = "No matched clades to label.";
+    return;
+  }
+
+  pushUndo();
+  let labeledCount = 0;
+  state.experimentalMatches.forEach(match => {
+    if (!state.nodeById[match.nodeId]) return;
+    state.nodeLabels[match.nodeId] = `${match.splitId} ${match.side}`;
+    labeledCount++;
+  });
+
+  document.getElementById("experimental-analysis-label-result").textContent =
+    `${labeledCount} clade${labeledCount === 1 ? "" : "s"} labeled from experimental matches.`;
+  invalidateRenderCache();
+  renderTree();
+  buildLabelList();
+  updateLabelInput();
+}
+
+function refreshExperimentalHighlights() {
+  state.experimentalNodes = new Set();
+  state.experimentalMatches = [];
+
+  if (!state.experimentalAnalysis || !state.treeData) {
+    updateExperimentalAnalysisUi();
+    return;
+  }
+
+  const signatureToNodes = buildExperimentalNodeIndex(state.treeData);
+  const experimentalNodes = new Set();
+  const matches = [];
+
+  state.experimentalAnalysis.clades.forEach(clade => {
+    const matchingNodes = signatureToNodes.get(clade.signature);
+    if (!matchingNodes || matchingNodes.length === 0) return;
+    const selectedNode = matchingNodes[0];
+    experimentalNodes.add(selectedNode.nodeId);
+    matches.push({
+      ...clade,
+      nodeId: selectedNode.nodeId,
+      support: selectedNode.support,
+    });
+  });
+
+  state.experimentalNodes = experimentalNodes;
+  state.experimentalMatches = matches;
+  updateExperimentalAnalysisUi();
+}
+
+function refreshExperimentalHighlightsAndInfo() {
+  refreshExperimentalHighlights();
+  const totalTips = state.treeData ? countAllTips(state.treeData) : null;
+  showLoadedInfo(totalTips);
 }
 
 function getSourceSpeciesConfig() {
@@ -528,12 +770,45 @@ const LABEL_ICONS = [
   { id: "e-corn", label: "\ud83c\udf3d" },
 ];
 
+function parseExperimentalNodeLabel(label) {
+  const match = /^split_(\d+)\s+(slow|fast)\b/i.exec(String(label || "").trim());
+  if (!match) return null;
+  return {
+    splitNumber: Number(match[1]),
+    sideOrder: match[2].toLowerCase() === "slow" ? 0 : 1,
+  };
+}
+
+function compareNodeLabelEntries([nodeIdA, labelA], [nodeIdB, labelB]) {
+  const experimentalA = parseExperimentalNodeLabel(labelA);
+  const experimentalB = parseExperimentalNodeLabel(labelB);
+
+  if (experimentalA && experimentalB) {
+    if (experimentalA.splitNumber !== experimentalB.splitNumber) {
+      return experimentalA.splitNumber - experimentalB.splitNumber;
+    }
+    if (experimentalA.sideOrder !== experimentalB.sideOrder) {
+      return experimentalA.sideOrder - experimentalB.sideOrder;
+    }
+  } else if (experimentalA || experimentalB) {
+    return experimentalA ? -1 : 1;
+  }
+
+  const labelCompare = String(labelA).localeCompare(String(labelB), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+  if (labelCompare !== 0) return labelCompare;
+  return Number(nodeIdA) - Number(nodeIdB);
+}
+
 function buildLabelList() {
   const container = document.getElementById("label-list");
   container.innerHTML = "";
   const hasLabels = Object.keys(state.nodeLabels).length > 0;
   document.getElementById("label-size-container").style.display = hasLabels ? "flex" : "none";
-  for (const [nodeId, label] of Object.entries(state.nodeLabels)) {
+  const sortedLabelEntries = Object.entries(state.nodeLabels).sort(compareNodeLabelEntries);
+  for (const [nodeId, label] of sortedLabelEntries) {
     const row = document.createElement("div");
     row.className = "label-entry";
 
@@ -1145,6 +1420,12 @@ function showLoadedInfo(totalTips) {
   }
   lines.push(`<span class="loaded-label">Species source:</span> <span class="loaded-value">${getSpeciesSourceLabel()}</span>`);
   lines.push(`<span class="loaded-label">Datasets:</span> <span class="loaded-value">${state.datasetFiles.length}</span>`);
+  const experimentalSummary = getExperimentalSummary();
+  lines.push(
+    experimentalSummary
+      ? `<span class="loaded-label">Experimental:</span> <span class="loaded-value">${experimentalSummary}</span>`
+      : `<span class="loaded-label">Experimental:</span> <span class="loaded-none">none</span>`
+  );
   el.innerHTML = lines.join("<br>");
 }
 
@@ -1216,6 +1497,7 @@ function restoreState(snapshot) {
   state.parentMap = {};
   indexNodes(state.treeData);
   updateSubtreeModeUi();
+  refreshExperimentalHighlightsAndInfo();
   // Sync UI controls to restored state
   document.getElementById("phylogram-toggle").checked = state.usePhylogram;
   document.getElementById("tip-labels-toggle").checked = state.showTipLabels;
@@ -1277,6 +1559,8 @@ function openSubtree(nodeId) {
   state.tx = 20;
   state.ty = 20;
   updateSubtreeModeUi();
+  invalidateRenderCache();
+  refreshExperimentalHighlightsAndInfo();
   updateTriangleControls();
   renderTree();
 }
@@ -1311,6 +1595,7 @@ function rerootAt(nodeId) {
   state.tx = 20;
   state.ty = 20;
   updateSubtreeModeUi();
+  refreshExperimentalHighlightsAndInfo();
   document.getElementById("export-form").style.display = "none";
   document.getElementById("newick-form").style.display = "none";
   updateTriangleControls();
@@ -1329,6 +1614,8 @@ function restoreFullTree() {
   state.tx = 20;
   state.ty = 20;
   updateSubtreeModeUi();
+  invalidateRenderCache();
+  refreshExperimentalHighlightsAndInfo();
   renderTree();
 }
 
@@ -1436,6 +1723,7 @@ function openExportPanel(nodeId) {
   updateSpeciesCounts();
   buildMotifList();
   renderTree();
+  syncNodeListActiveStates();
 
   let missingTips = [];
   if (state.hasFasta && state.allTipNames.length > 0) {
@@ -1712,23 +2000,11 @@ function highlightSharedNodes() {
 }
 
 function selectSharedNode(nodeId) {
-  openExportPanel(nodeId);
-  document.querySelectorAll("#shared-nodes-list .name-match-item").forEach(el => {
-    el.classList.toggle("name-match-active", parseInt(el.dataset.nodeid, 10) === nodeId);
-  });
-  invalidateRenderCache();
-  renderTree();
-  requestAnimationFrame(() => {
-    const ring = dom.group.querySelector(".selected-node-ring");
-    if (ring) {
-      const cx = parseFloat(ring.getAttribute("cx"));
-      const cy = parseFloat(ring.getAttribute("cy"));
-      const rect = dom.svg.getBoundingClientRect();
-      state.tx = rect.width / 2 - cx * state.scale;
-      state.ty = rect.height / 2 - cy * state.scale;
-      applyTransform();
-    }
-  });
+  selectNode(nodeId, { center: true, expandCollapsedPath: true });
+}
+
+function selectExperimentalNode(nodeId) {
+  selectNode(nodeId, { center: true, expandCollapsedPath: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -1953,6 +2229,9 @@ async function loadSessionV2(session, fromSetup) {
   state.tipLengths = workspace.tipLengths;
   state.sourceTexts = session.sourceTexts;
   state.datasetFiles = workspace.datasetFileNames;
+  state.experimentalAnalysis = workspace.experimentalAnalysis || null;
+  state.experimentalMatches = [];
+  state.experimentalNodes = new Set();
   state.datasetTextsByName = {};
   for (const d of (session.sourceTexts.datasets || [])) {
     state.datasetTextsByName[d.name] = d.text;
@@ -1981,9 +2260,6 @@ async function loadSessionV2(session, fromSetup) {
   state.parentMap = {};
   indexNodes(state.treeData);
 
-  const totalTips = countAllTips(state.treeData);
-  showLoadedInfo(totalTips);
-
   buildSpeciesList(speciesList);
   buildExcludeSpeciesList(speciesList);
   setupControls();
@@ -1993,6 +2269,7 @@ async function loadSessionV2(session, fromSetup) {
 
   // Restore UI state
   applySessionSettings(session);
+  refreshExperimentalHighlightsAndInfo();
 
   // Restore motifs locally
   state.motifList = [];
@@ -2085,6 +2362,7 @@ function loadSessionV1(session, fromSetup) {
   updateFilterBadge();
   buildLabelList();
   updateLabelInput();
+  refreshExperimentalHighlightsAndInfo();
   invalidateRenderCache();
   renderTree();
   document.getElementById("session-result").textContent = "V1 session settings applied.";
@@ -2342,6 +2620,10 @@ function buildInfoLines() {
   if (state.activeHeatmaps.length > 0) {
     lines.push(`Heatmaps: ${state.activeHeatmaps.map(h => h.name).join(", ")}`);
   }
+  const experimentalSummary = getExperimentalSummary();
+  if (experimentalSummary) {
+    lines.push(`Experimental: ${experimentalSummary}`);
+  }
   const checkedSpecies = [...document.querySelectorAll('#species-list input[data-species]:checked')].map(cb => cb.dataset.species);
   if (checkedSpecies.length > 0) {
     lines.push(`Highlighted species: ${checkedSpecies.join(", ")}`);
@@ -2429,6 +2711,24 @@ function handleFilesSelected(files) {
     aaSelect.value = detected.aaFiles[0].name;
   }
 
+  // Experimental JSON select
+  const experimentalSelect = dom.detectedExperimentalSelect;
+  experimentalSelect.innerHTML = "";
+  const experimentalNoneOpt = document.createElement("option");
+  experimentalNoneOpt.value = "";
+  experimentalNoneOpt.textContent = "None";
+  experimentalSelect.appendChild(experimentalNoneOpt);
+  detected.analysisFiles.forEach(f => {
+    const opt = document.createElement("option");
+    const fileKey = getFilePickerKey(f);
+    opt.value = fileKey;
+    opt.textContent = fileKey;
+    experimentalSelect.appendChild(opt);
+  });
+  if (detected.analysisFiles.length === 1) {
+    experimentalSelect.value = getFilePickerKey(detected.analysisFiles[0]);
+  }
+
   // Orthofinder
   dom.detectedOrthoSpan.textContent = detected.orthoFiles.length > 0
     ? `${detected.orthoFiles.length} species files found`
@@ -2457,6 +2757,7 @@ async function doSetupLoad() {
   const detected = state.stagedFiles.detected;
   const nwkName = dom.detectedNwkSelect.value;
   const aaName = dom.detectedAaSelect.value;
+  const experimentalName = dom.detectedExperimentalSelect.value;
   const speciesConfig = getSetupSpeciesConfig();
 
   if (!nwkName) {
@@ -2466,6 +2767,9 @@ async function doSetupLoad() {
 
   const nwkFile = detected.nwkFiles.find(f => f.name === nwkName);
   const aaFile = aaName ? detected.aaFiles.find(f => f.name === aaName) : null;
+  const experimentalFile = experimentalName
+    ? detected.analysisFiles.find(f => getFilePickerKey(f) === experimentalName)
+    : null;
 
   dom.setupError.textContent = "";
   dom.setupLoadBtn.disabled = true;
@@ -2477,6 +2781,7 @@ async function doSetupLoad() {
       aaFile: aaFile || null,
       orthoFiles: detected.orthoFiles,
       datasetFiles: detected.datasetFiles,
+      experimentalFile: experimentalFile || null,
       speciesConfig,
     });
 
@@ -2511,6 +2816,9 @@ function applyLoadResult(result) {
   state.tipToSpecies = result.tipToSpecies;
   state.tipLengths = result.tipLengths;
   state.sourceTexts = result.sourceTexts;
+  state.experimentalAnalysis = result.experimentalAnalysis || null;
+  state.experimentalMatches = [];
+  state.experimentalNodes = new Set();
   state.datasetFiles = result.datasetFileNames;
   state.datasetTextsByName = {};
   if (result.sourceTexts && result.sourceTexts.datasets) {
@@ -2530,9 +2838,9 @@ function initAfterLoad() {
   state.nodeById = {};
   state.parentMap = {};
   indexNodes(state.treeData);
+  refreshExperimentalHighlightsAndInfo();
 
   const totalTips = countAllTips(state.treeData);
-  showLoadedInfo(totalTips);
 
   if (totalTips > 1000) {
     state.showTipLabels = false;
@@ -2765,6 +3073,7 @@ function setupControls() {
   updateMotifPlaceholder();
 
   document.getElementById("highlight-shared").addEventListener("click", highlightSharedNodes);
+  document.getElementById("experimental-label-btn").addEventListener("click", labelExperimentalClades);
   document.getElementById("exclude-none").addEventListener("click", () => {
     document.querySelectorAll("#exclude-species-list input").forEach(cb => { cb.checked = false; });
   });
@@ -2920,8 +3229,7 @@ function onTreeClick(event) {
     renderTree();
     return;
   }
-  openExportPanel(numericId);
-  if (state.hasFasta) copyNodeFasta(numericId);
+  selectNode(numericId);
 }
 
 function onTreeHover(event) {
@@ -2945,6 +3253,7 @@ function onTreeHover(event) {
   const tipCount = node ? countAllTips(node) : 0;
   let text = `Node #${el.dataset.nodeid}\nTips: ${tipCount}`;
   if (el.dataset.support != null) text += `\nSupport: ${el.dataset.support}`;
+  if (node && state.experimentalNodes.has(node.id)) text += "\nExperimental match";
   text += state.hasFasta ? "\nClick: select & copy FASTA" : "\nClick: select node";
   text += "\nShift+click: collapse/expand\nCtrl+click: view subtree";
   dom.tooltip.textContent = text;

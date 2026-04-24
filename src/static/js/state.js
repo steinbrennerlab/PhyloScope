@@ -25,6 +25,9 @@ export const state = {
   datasetTextsByName: {},
   parsedDatasets: {},
   activeHeatmaps: [],
+  experimentalAnalysis: null,
+  experimentalMatches: [],
+  experimentalNodes: new Set(),
 
   // Species & sequences
   speciesMap: {},
@@ -98,6 +101,7 @@ export const dom = {
   detectedFilesPanel: document.getElementById("detected-files"),
   detectedNwkSelect: document.getElementById("detected-nwk"),
   detectedAaSelect: document.getElementById("detected-aa"),
+  detectedExperimentalSelect: document.getElementById("detected-experimental"),
   detectedOrthoSpan: document.getElementById("detected-ortho"),
   speciesSourceSelect: document.getElementById("species-source-select"),
   speciesInferPanel: document.getElementById("species-infer-panel"),
@@ -129,6 +133,7 @@ export function getInlineStyles() {
     ".tip-label": `font-size:${state.tipLabelSize}px;font-family:system-ui,sans-serif`,
     ".motif-match": "stroke:#e22;stroke-width:2",
     ".shared-node": "fill:#ff6600;stroke:#c40;stroke-width:1.5",
+    ".experimental-node": "fill:#14b8a6;stroke:#0f766e;stroke-width:1.5",
     ".collapsed-triangle": "fill:#cde;stroke:#89a",
     ".bootstrap-label": "font-size:8px;fill:#666",
     ".node-label": `font-size:${state.labelFontSize}px;font-weight:bold;fill:#333;font-family:system-ui,sans-serif`,
@@ -153,6 +158,9 @@ export function resetClientState() {
   state.datasetTextsByName = {};
   state.parsedDatasets = {};
   state.activeHeatmaps = [];
+  state.experimentalAnalysis = null;
+  state.experimentalMatches = [];
+  state.experimentalNodes = new Set();
   state.speciesMap = {};
   state.tipToSpecies = {};
   state.speciesColors = {};

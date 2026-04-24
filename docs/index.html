@@ -17,7 +17,7 @@
       <button id="setup-files-btn" class="btn" style="flex:1;">Choose Files</button>
     </div>
     <input type="file" id="folder-picker" webkitdirectory multiple style="display:none;">
-    <input type="file" id="file-picker" multiple accept=".nwk,.fa,.fasta,.txt" style="display:none;">
+    <input type="file" id="file-picker" multiple accept=".nwk,.fa,.fasta,.txt,.json" style="display:none;">
     <div id="setup-error"></div>
     <div id="detected-files" style="display:none;">
       <div class="detected-files-header">Detected files:</div>
@@ -65,6 +65,12 @@
         <label class="detected-label">Datasets:</label>
         <span id="detected-datasets" class="detected-status">&mdash;</span>
       </div>
+      <div class="detected-row">
+        <label class="detected-label" for="detected-experimental">Experimental JSON:</label>
+        <select id="detected-experimental" class="detected-select">
+          <option value="">None</option>
+        </select>
+      </div>
     </div>
     <div id="setup-load-row" style="display:none;">
       <button id="setup-load" class="btn" style="width:100%;">Load</button>
@@ -80,7 +86,8 @@
     *.aa.fa              &mdash; Preferred default protein alignment (optional)
     *.fa / *.fasta       &mdash; Other protein alignment names also accepted
     orthofinder-input/   &mdash; Folder of per-species FASTA files (optional)
-    dataset/             &mdash; Tab-delimited heatmap data (optional)</pre>
+    dataset/             &mdash; Tab-delimited heatmap data (optional)
+    *.json               &mdash; Experimental rate-shift split import (optional)</pre>
     </div>
   </div>
 </div>
@@ -246,6 +253,16 @@
     </details>
     <div id="shared-result"></div>
     <div id="shared-nodes-list" class="name-matches-list"></div>
+  </div>
+
+  <div class="section" id="experimental-analysis-section" style="display:none;">
+    <h3>Experimental Analysis</h3>
+    <div id="experimental-analysis-result" class="hint"></div>
+    <div class="row">
+      <button id="experimental-label-btn" class="btn-sm">Label matched clades</button>
+    </div>
+    <div id="experimental-analysis-label-result" class="hint"></div>
+    <div id="experimental-analysis-list" class="name-matches-list"></div>
   </div>
 
   <div class="section">
