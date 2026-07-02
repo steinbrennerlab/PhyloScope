@@ -99,14 +99,12 @@ export function renderTree() {
     (state.layoutMode === "rectangular" || state.layoutMode === "circular") &&
     state.activeHeatmaps.length > 0
   );
-  if (allowFastMode) {
-    const key = getRenderCacheKey(checkedSpecies);
-    if (state.renderCache && state.renderCacheKey === key) {
-      dom.group.innerHTML = state.renderCache;
-      attachTreeEvents();
-      applyTransform();
-      return;
-    }
+  const cacheKey = allowFastMode ? getRenderCacheKey(checkedSpecies) : null;
+  if (allowFastMode && state.renderCache && state.renderCacheKey === cacheKey) {
+    dom.group.innerHTML = state.renderCache;
+    attachTreeEvents();
+    applyTransform();
+    return;
   }
 
   const fragments = [];
@@ -121,7 +119,7 @@ export function renderTree() {
   const html = fragments.join("\n");
   if (allowFastMode) {
     state.renderCache = html;
-    state.renderCacheKey = getRenderCacheKey(checkedSpecies);
+    state.renderCacheKey = cacheKey;
   }
 
   dom.group.innerHTML = html;
@@ -182,18 +180,7 @@ function renderRectangular(fragments, checkedSpecies) {
     fragments.push(`<line x1="${px}" y1="${ny}" x2="${nx}" y2="${ny}" stroke="${color}" stroke-width="1"/>`);
 
     if (node.collapsed) {
-      const triH = (state.uniformTriangles ? 30 : Math.min(node.tipCount * 2, 40)) * state.triangleScale / 100;
-      const triW = 30 * state.triangleScale / 100;
-      const triLabel = state.nodeLabels[node.id] ? `${state.nodeLabels[node.id]} (${node.tipCount})` : `${node.tipCount} tips`;
-      fragments.push(
-        `<polygon points="${nx},${ny} ${nx + triW},${ny - triH / 2} ${nx + triW},${ny + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
-        `<text x="${nx + triW + 4}" y="${ny + 3}" font-size="9" fill="#666">${triLabel}</text>`
-      );
-      drawNodeDot(fragments, nx, ny, node);
-      drawCollapsedTipMarkers(fragments, nx + triW + 4, ny, node, 0, 12);
-      if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
-        fragments.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
-      }
+      appendCollapsedRectangular(fragments, node);
       return;
     }
     if (node.layoutChildren) {
@@ -268,20 +255,7 @@ function renderCircular(fragments, checkedSpecies) {
     fragments.push(`<line x1="${px}" y1="${py}" x2="${nx}" y2="${ny}" stroke="${color}" stroke-width="1"/>`);
 
     if (node.collapsed) {
-      const wedgeR = node.r + 20 * state.triangleScale / 100;
-      const halfArc = (state.uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * state.triangleScale / 100;
-      const [wx1, wy1] = toXY(wedgeR, node.angle - halfArc);
-      const [wx2, wy2] = toXY(wedgeR, node.angle + halfArc);
-      const large = halfArc * 2 > Math.PI ? 1 : 0;
-      fragments.push(
-        `<path d="M${nx},${ny} L${wx1},${wy1} A${wedgeR},${wedgeR} 0 ${large},1 ${wx2},${wy2} Z" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
-        `<text x="${(wx1 + wx2) / 2 + 4}" y="${(wy1 + wy2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
-      );
-      drawNodeDot(fragments, nx, ny, node);
-      drawCollapsedTipMarkers(fragments, (wx1 + wx2) / 2 + 4, (wy1 + wy2) / 2, node, 0, 12);
-      if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
-        fragments.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
-      }
+      appendCollapsedCircular(fragments, node, nx, ny, toXY);
       return;
     }
     if (node.layoutChildren) {
@@ -368,21 +342,7 @@ function renderUnrooted(fragments, checkedSpecies) {
     fragments.push(`<line x1="${node.parentX}" y1="${node.parentY}" x2="${node.x}" y2="${node.y}" stroke="${color}" stroke-width="1"/>`);
 
     if (node.collapsed) {
-      const fanLen = 20 * state.triangleScale / 100;
-      const halfW = (state.uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * state.triangleScale / 100;
-      const x1 = node.x + fanLen * Math.cos(node.angle - halfW);
-      const y1 = node.y + fanLen * Math.sin(node.angle - halfW);
-      const x2 = node.x + fanLen * Math.cos(node.angle + halfW);
-      const y2 = node.y + fanLen * Math.sin(node.angle + halfW);
-      fragments.push(
-        `<polygon points="${node.x},${node.y} ${x1},${y1} ${x2},${y2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
-        `<text x="${(x1 + x2) / 2 + 2}" y="${(y1 + y2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
-      );
-      drawNodeDot(fragments, node.x, node.y, node);
-      drawCollapsedTipMarkers(fragments, (x1 + x2) / 2 + 2, (y1 + y2) / 2, node, 0, 12);
-      if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
-        fragments.push(`<circle cx="${node.x}" cy="${node.y}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
-      }
+      appendCollapsedUnrooted(fragments, node);
       return;
     }
     if (node.layoutChildren) {
@@ -415,25 +375,37 @@ const EMOJI_MAP = {
   "e-mushroom":"\ud83c\udf44","e-cactus":"\ud83c\udf35","e-corn":"\ud83c\udf3d",
 };
 
-function drawNodeIcon(fragments, cx, cy, r, fill, cls, nodeId, sup) {
-  const icon = state.nodeLabelIcons[nodeId] || "dot";
-  const attrs = `fill="${fill}" class="${cls}" data-nodeid="${nodeId}"${sup != null ? ` data-support="${sup}"` : ""}`;
+function starPoints(cx, cy, r) {
+  const pts = [];
+  for (let i = 0; i < 10; i++) {
+    const a = Math.PI / 2 + i * Math.PI / 5;
+    const rad = i % 2 === 0 ? r : r * 0.45;
+    pts.push(`${cx + rad * Math.cos(a)},${cy - rad * Math.sin(a)}`);
+  }
+  return pts.join(" ");
+}
+
+/**
+ * Emit an icon marker (emoji, geometric shape, or plain dot) at (cx, cy).
+ * Tip and node markers share the same shapes but differ only in their
+ * class/data-* attributes, so both paths route through here.
+ *
+ * @param {string} shapeClass - class applied to geometric shapes and the default dot.
+ * @param {string} baseClass  - class applied to emoji glyphs and the "none" placeholder.
+ * @param {string} shapeData  - trailing data-* attributes for geometric shapes / default dot.
+ * @param {string} baseData   - trailing data-* attributes for emoji / "none" placeholder.
+ */
+function appendIconShape(fragments, cx, cy, r, { icon, fill, shapeClass, baseClass, shapeData, baseData }) {
   if (EMOJI_MAP[icon]) {
     const fontSize = r * 2.5;
-    fragments.push(`<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" font-size="${fontSize}" class="node-dot" data-nodeid="${nodeId}" style="cursor:pointer">${EMOJI_MAP[icon]}</text>`);
+    fragments.push(`<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" font-size="${fontSize}" class="${baseClass}" ${baseData} style="cursor:pointer">${EMOJI_MAP[icon]}</text>`);
     return;
   }
+  const attrs = `fill="${fill}" class="${shapeClass}" ${shapeData}`;
   switch (icon) {
-    case "star": {
-      const pts = [];
-      for (let i = 0; i < 10; i++) {
-        const a = Math.PI / 2 + i * Math.PI / 5;
-        const rad = i % 2 === 0 ? r : r * 0.45;
-        pts.push(`${cx + rad * Math.cos(a)},${cy - rad * Math.sin(a)}`);
-      }
-      fragments.push(`<polygon points="${pts.join(" ")}" ${attrs}/>`);
+    case "star":
+      fragments.push(`<polygon points="${starPoints(cx, cy, r)}" ${attrs}/>`);
       break;
-    }
     case "square":
       fragments.push(`<rect x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r * 2}" ${attrs}/>`);
       break;
@@ -446,11 +418,23 @@ function drawNodeIcon(fragments, cx, cy, r, fill, cls, nodeId, sup) {
       fragments.push(`<polygon points="${cx},${cy - r} ${cx + r},${cy + r * 0.7} ${cx - r},${cy + r * 0.7}" ${attrs}/>`);
       break;
     case "none":
-      fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="transparent" class="node-dot" data-nodeid="${nodeId}"/>`);
+      fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="transparent" class="${baseClass}" ${baseData}/>`);
       break;
     default:
       fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" ${attrs}/>`);
   }
+}
+
+function drawNodeIcon(fragments, cx, cy, r, fill, cls, nodeId, sup) {
+  const nodeData = `data-nodeid="${nodeId}"`;
+  appendIconShape(fragments, cx, cy, r, {
+    icon: state.nodeLabelIcons[nodeId] || "dot",
+    fill,
+    shapeClass: cls,
+    baseClass: "node-dot",
+    shapeData: `${nodeData}${sup != null ? ` data-support="${sup}"` : ""}`,
+    baseData: nodeData,
+  });
 }
 
 function drawCollapsedTipMarkers(fragments, cx, cy, node, offsetX, offsetY) {
@@ -509,40 +493,15 @@ function drawNodeDot(fragments, cx, cy, node) {
 }
 
 function drawTipIcon(fragments, cx, cy, r, fill, tipName, species, icon) {
-  const attrs = `fill="${fill}" class="tip-dot" data-tip="${tipName}" data-species="${species}"`;
-  if (EMOJI_MAP[icon]) {
-    const fontSize = r * 2.5;
-    fragments.push(`<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" font-size="${fontSize}" class="tip-dot" data-tip="${tipName}" data-species="${species}" style="cursor:pointer">${EMOJI_MAP[icon]}</text>`);
-    return;
-  }
-  switch (icon) {
-    case "star": {
-      const pts = [];
-      for (let i = 0; i < 10; i++) {
-        const a = Math.PI / 2 + i * Math.PI / 5;
-        const rad = i % 2 === 0 ? r : r * 0.45;
-        pts.push(`${cx + rad * Math.cos(a)},${cy - rad * Math.sin(a)}`);
-      }
-      fragments.push(`<polygon points="${pts.join(" ")}" ${attrs}/>`);
-      break;
-    }
-    case "square":
-      fragments.push(`<rect x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r * 2}" ${attrs}/>`);
-      break;
-    case "diamond": {
-      const dr = r * 1.2;
-      fragments.push(`<polygon points="${cx},${cy - dr} ${cx + dr},${cy} ${cx},${cy + dr} ${cx - dr},${cy}" ${attrs}/>`);
-      break;
-    }
-    case "triangle":
-      fragments.push(`<polygon points="${cx},${cy - r} ${cx + r},${cy + r * 0.7} ${cx - r},${cy + r * 0.7}" ${attrs}/>`);
-      break;
-    case "none":
-      fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="transparent" class="tip-dot" data-tip="${tipName}" data-species="${species}"/>`);
-      break;
-    default:
-      fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" ${attrs}/>`);
-  }
+  const tipData = `data-tip="${tipName}" data-species="${species}"`;
+  appendIconShape(fragments, cx, cy, r, {
+    icon,
+    fill,
+    shapeClass: "tip-dot",
+    baseClass: "tip-dot",
+    shapeData: tipData,
+    baseData: tipData,
+  });
 }
 
 function drawTipDot(fragments, cx, cy, node, checkedSpecies) {
@@ -612,6 +571,89 @@ function drawTipLabelRadial(fragments, x, y, angleDeg, anchor, node, checkedSpec
   }
 }
 
+// Fill color and radius for a tip dot in fast mode (single flat color per tip,
+// no motif pie). Shared by all three fast-mode layout collectors.
+function getFastTipDotStyle(node, checkedSpecies) {
+  const d = state.dotSize;
+  const isMotif = state.motifMatches.has(node.name);
+  const isName = state.nameMatches.has(node.name);
+  const marker = state.tipMarkers[node.name];
+  const spColor = getNodeColor(node, checkedSpecies);
+  let fill;
+  if (marker) {
+    fill = marker.color || spColor;
+  } else if (isMotif) {
+    const colors = getMotifColors(node.name);
+    fill = colors.length > 0 ? colors[0] : "#e22";
+  } else if (isName) {
+    fill = "#2563eb";
+  } else {
+    fill = spColor;
+  }
+  const r = marker ? d * 1.5 : isMotif || isName || spColor !== "#333" ? d : d * 0.7;
+  return { fill, r };
+}
+
+// Whether any descendant leaf of `node` is the currently selected tip.
+// Short-circuits, unlike collectAllTipNames(node).includes(...).
+function subtreeHasTip(node, tipName) {
+  if (!node.ch || node.ch.length === 0) return node.name === tipName;
+  return node.ch.some(child => subtreeHasTip(child, tipName));
+}
+
+// Red ring drawn on a collapsed clade that contains the selected tip.
+function appendSelectedTipRing(out, node, cx, cy) {
+  if (state.selectedTip && subtreeHasTip(node, state.selectedTip)) {
+    out.push(`<circle cx="${cx}" cy="${cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+  }
+}
+
+// Collapsed-clade markup (triangle/wedge/fan + node dot + tip markers + ring),
+// appended to `out`. One per layout, shared between the plain and fast paths.
+function appendCollapsedRectangular(out, node) {
+  const triH = (state.uniformTriangles ? 30 : Math.min(node.tipCount * 2, 40)) * state.triangleScale / 100;
+  const triW = 30 * state.triangleScale / 100;
+  const triLabel = state.nodeLabels[node.id] ? `${state.nodeLabels[node.id]} (${node.tipCount})` : `${node.tipCount} tips`;
+  out.push(
+    `<polygon points="${node.x},${node.y} ${node.x + triW},${node.y - triH / 2} ${node.x + triW},${node.y + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+    `<text x="${node.x + triW + 4}" y="${node.y + 3}" font-size="9" fill="#666">${triLabel}</text>`
+  );
+  drawNodeDot(out, node.x, node.y, node);
+  drawCollapsedTipMarkers(out, node.x + triW + 4, node.y, node, 0, 12);
+  appendSelectedTipRing(out, node, node.x, node.y);
+}
+
+function appendCollapsedCircular(out, node, nx, ny, toXY) {
+  const wedgeR = node.r + 20 * state.triangleScale / 100;
+  const halfArc = (state.uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * state.triangleScale / 100;
+  const [wx1, wy1] = toXY(wedgeR, node.angle - halfArc);
+  const [wx2, wy2] = toXY(wedgeR, node.angle + halfArc);
+  const large = halfArc * 2 > Math.PI ? 1 : 0;
+  out.push(
+    `<path d="M${nx},${ny} L${wx1},${wy1} A${wedgeR},${wedgeR} 0 ${large},1 ${wx2},${wy2} Z" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+    `<text x="${(wx1 + wx2) / 2 + 4}" y="${(wy1 + wy2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
+  );
+  drawNodeDot(out, nx, ny, node);
+  drawCollapsedTipMarkers(out, (wx1 + wx2) / 2 + 4, (wy1 + wy2) / 2, node, 0, 12);
+  appendSelectedTipRing(out, node, nx, ny);
+}
+
+function appendCollapsedUnrooted(out, node) {
+  const fanLen = 20 * state.triangleScale / 100;
+  const halfW = (state.uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * state.triangleScale / 100;
+  const x1 = node.x + fanLen * Math.cos(node.angle - halfW);
+  const y1 = node.y + fanLen * Math.sin(node.angle - halfW);
+  const x2 = node.x + fanLen * Math.cos(node.angle + halfW);
+  const y2 = node.y + fanLen * Math.sin(node.angle + halfW);
+  out.push(
+    `<polygon points="${node.x},${node.y} ${x1},${y1} ${x2},${y2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+    `<text x="${(x1 + x2) / 2 + 2}" y="${(y1 + y2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
+  );
+  drawNodeDot(out, node.x, node.y, node);
+  drawCollapsedTipMarkers(out, (x1 + x2) / 2 + 2, (y1 + y2) / 2, node, 0, 12);
+  appendSelectedTipRing(out, node, node.x, node.y);
+}
+
 function drawFastRectangular(fragments, root, checkedSpecies) {
   const branchPaths = [];
   const vlinePaths = [];
@@ -624,20 +666,7 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
     branchPaths.push({ x1: node.parentX, y1: node.y, x2: node.x, y2: node.y, color });
 
     if (node.collapsed) {
-      const triH = (state.uniformTriangles ? 30 : Math.min(node.tipCount * 2, 40)) * state.triangleScale / 100;
-      const triW = 30 * state.triangleScale / 100;
-      const triLabel = state.nodeLabels[node.id] ? `${state.nodeLabels[node.id]} (${node.tipCount})` : `${node.tipCount} tips`;
-      triangles.push(
-        `<polygon points="${node.x},${node.y} ${node.x + triW},${node.y - triH / 2} ${node.x + triW},${node.y + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
-        `<text x="${node.x + triW + 4}" y="${node.y + 3}" font-size="9" fill="#666">${triLabel}</text>`
-      );
-      const colFrag = [];
-      drawNodeDot(colFrag, node.x, node.y, node);
-      drawCollapsedTipMarkers(colFrag, node.x + triW + 4, node.y, node, 0, 12);
-      triangles.push(colFrag.join(""));
-      if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
-        triangles.push(`<circle cx="${node.x}" cy="${node.y}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
-      }
+      appendCollapsedRectangular(triangles, node);
       return;
     }
     if (node.layoutChildren) {
@@ -656,22 +685,7 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
       node.layoutChildren.forEach(collect);
     } else {
       const d = state.dotSize;
-      const isMotif = state.motifMatches.has(node.name);
-      const isName = state.nameMatches.has(node.name);
-      const marker = state.tipMarkers[node.name];
-      const spColor = getNodeColor(node, checkedSpecies);
-      let fill = "#333";
-      if (marker) {
-        fill = marker.color || spColor;
-      } else if (isMotif) {
-        const colors = getMotifColors(node.name);
-        fill = colors.length > 0 ? colors[0] : "#e22";
-      } else if (isName) {
-        fill = "#2563eb";
-      } else {
-        fill = spColor;
-      }
-      const r = marker ? d * 1.5 : isMotif || isName || spColor !== "#333" ? d : d * 0.7;
+      const { fill, r } = getFastTipDotStyle(node, checkedSpecies);
       dotData.push({ cx: node.x, cy: node.y, r, fill, className: "tip-dot", isTip: true, tipName: node.name, species: node.sp || "" });
       if (state.showTipLabels) {
         tipLabels.push({ x: node.x + d + 1, y: node.y + d, node });
@@ -702,22 +716,7 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
     branchPaths.push({ x1: px, y1: py, x2: nx, y2: ny, color });
 
     if (node.collapsed) {
-      const wedgeR = node.r + 20 * state.triangleScale / 100;
-      const halfArc = (state.uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * state.triangleScale / 100;
-      const [wx1, wy1] = toXY(wedgeR, node.angle - halfArc);
-      const [wx2, wy2] = toXY(wedgeR, node.angle + halfArc);
-      const large = halfArc * 2 > Math.PI ? 1 : 0;
-      triangles.push(
-        `<path d="M${nx},${ny} L${wx1},${wy1} A${wedgeR},${wedgeR} 0 ${large},1 ${wx2},${wy2} Z" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
-        `<text x="${(wx1 + wx2) / 2 + 4}" y="${(wy1 + wy2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
-      );
-      const colFrag = [];
-      drawNodeDot(colFrag, nx, ny, node);
-      drawCollapsedTipMarkers(colFrag, (wx1 + wx2) / 2 + 4, (wy1 + wy2) / 2, node, 0, 12);
-      triangles.push(colFrag.join(""));
-      if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
-        triangles.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
-      }
+      appendCollapsedCircular(triangles, node, nx, ny, toXY);
       return;
     }
     if (node.layoutChildren) {
@@ -742,22 +741,7 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
       node.layoutChildren.forEach(collect);
     } else {
       const d = state.dotSize;
-      const isMotif = state.motifMatches.has(node.name);
-      const isName = state.nameMatches.has(node.name);
-      const marker = state.tipMarkers[node.name];
-      const spColor = getNodeColor(node, checkedSpecies);
-      let fill = "#333";
-      if (marker) {
-        fill = marker.color || spColor;
-      } else if (isMotif) {
-        const colors = getMotifColors(node.name);
-        fill = colors.length > 0 ? colors[0] : "#e22";
-      } else if (isName) {
-        fill = "#2563eb";
-      } else {
-        fill = spColor;
-      }
-      const r = marker ? d * 1.5 : isMotif || isName || spColor !== "#333" ? d : d * 0.7;
+      const { fill, r } = getFastTipDotStyle(node, checkedSpecies);
       dotData.push({ cx: nx, cy: ny, r, fill, className: "tip-dot", isTip: true, tipName: node.name, species: node.sp || "" });
       if (state.showTipLabels) {
         const gap = d + 1;
@@ -794,23 +778,7 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
     branchPaths.push({ x1: node.parentX, y1: node.parentY, x2: node.x, y2: node.y, color });
 
     if (node.collapsed) {
-      const fanLen = 20 * state.triangleScale / 100;
-      const halfW = (state.uniformTriangles ? 0.2 : Math.min(node.tipCount * 0.01, 0.3)) * state.triangleScale / 100;
-      const x1 = node.x + fanLen * Math.cos(node.angle - halfW);
-      const y1 = node.y + fanLen * Math.sin(node.angle - halfW);
-      const x2 = node.x + fanLen * Math.cos(node.angle + halfW);
-      const y2 = node.y + fanLen * Math.sin(node.angle + halfW);
-      triangles.push(
-        `<polygon points="${node.x},${node.y} ${x1},${y1} ${x2},${y2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
-        `<text x="${(x1 + x2) / 2 + 2}" y="${(y1 + y2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
-      );
-      const colFrag = [];
-      drawNodeDot(colFrag, node.x, node.y, node);
-      drawCollapsedTipMarkers(colFrag, (x1 + x2) / 2 + 2, (y1 + y2) / 2, node, 0, 12);
-      triangles.push(colFrag.join(""));
-      if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
-        triangles.push(`<circle cx="${node.x}" cy="${node.y}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
-      }
+      appendCollapsedUnrooted(triangles, node);
       return;
     }
     if (node.layoutChildren) {
@@ -828,22 +796,7 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
       node.layoutChildren.forEach(collect);
     } else {
       const d = state.dotSize;
-      const isMotif = state.motifMatches.has(node.name);
-      const isName = state.nameMatches.has(node.name);
-      const marker = state.tipMarkers[node.name];
-      const spColor = getNodeColor(node, checkedSpecies);
-      let fill = "#333";
-      if (marker) {
-        fill = marker.color || spColor;
-      } else if (isMotif) {
-        const colors = getMotifColors(node.name);
-        fill = colors.length > 0 ? colors[0] : "#e22";
-      } else if (isName) {
-        fill = "#2563eb";
-      } else {
-        fill = spColor;
-      }
-      const r = marker ? d * 1.5 : isMotif || isName || spColor !== "#333" ? d : d * 0.7;
+      const { fill, r } = getFastTipDotStyle(node, checkedSpecies);
       dotData.push({ cx: node.x, cy: node.y, r, fill, className: "tip-dot", isTip: true, tipName: node.name, species: node.sp || "" });
       if (state.showTipLabels) {
         const gap = d + 1;

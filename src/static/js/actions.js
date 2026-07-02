@@ -3,8 +3,8 @@ import {
   collectAllTipNames,
   countAllTips,
   deepCopyNode,
-  indexNodes,
   patristicDistance,
+  reindexTree,
 } from "./tree-utils.js";
 import {
   applyTransform,
@@ -81,11 +81,62 @@ function triggerDownload(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+// Pop a native color input off-screen for a label/marker swatch. On pick it
+// snapshots undo, applies the color via onPick, live-updates the swatch, and
+// re-renders; onDone (if given) runs after the render.
+function openColorSwatchPicker(swatch, { initial, onPick, onDone }) {
+  const picker = document.createElement("input");
+  picker.type = "color";
+  picker.value = initial || "#333333";
+  picker.style.cssText = "position:absolute;opacity:0;width:0;height:0;";
+  document.body.appendChild(picker);
+  picker.addEventListener("input", () => {
+    pushUndo();
+    onPick(picker.value);
+    swatch.style.background = picker.value;
+    invalidateRenderCache();
+    renderTree();
+    if (onDone) onDone(picker.value);
+  });
+  picker.addEventListener("change", () => picker.remove());
+  picker.click();
+}
+
 function rebuildMotifMatches() {
   state.motifMatches = new Set();
   for (const entry of state.motifList) {
     for (const tip of entry.tipNames) state.motifMatches.add(tip);
   }
+}
+
+// Sorted list of tip names whose ungapped sequence matches the compiled regex.
+function matchTipsByRegex(compiled) {
+  return Object.entries(state.proteinSeqsUngapped)
+    .filter(([, seq]) => compiled.test(seq))
+    .map(([tip]) => tip)
+    .sort();
+}
+
+// Recompute motif matches from a saved session's { pattern, type } list against
+// the current alignment. Shared by the v1 and v2 session loaders.
+function restoreMotifsFromSession(session) {
+  state.motifList = [];
+  if (!session.motifList || !state.proteinSeqsUngapped) return;
+  for (const motif of session.motifList) {
+    let regexStr;
+    if (motif.type === "prosite") {
+      try { regexStr = prositeToRegex(motif.pattern); } catch { continue; }
+    } else {
+      regexStr = motif.pattern;
+    }
+    try {
+      const compiled = new RegExp(regexStr, "i");
+      const color = MOTIF_PALETTE[state.motifList.length % MOTIF_PALETTE.length];
+      state.motifList.push({ pattern: motif.pattern, type: motif.type, tipNames: matchTipsByRegex(compiled), color });
+    } catch { /* skip invalid patterns */ }
+  }
+  rebuildMotifMatches();
+  buildMotifList();
 }
 
 function updateUndoRedoButtons() {
@@ -835,22 +886,10 @@ function buildLabelList() {
     swatch.className = "tip-label-swatch";
     swatch.style.background = state.nodeLabelColors[nodeId] || "#333";
     swatch.title = "Click to change color";
-    swatch.addEventListener("click", () => {
-      const picker = document.createElement("input");
-      picker.type = "color";
-      picker.value = state.nodeLabelColors[nodeId] || "#333333";
-      picker.style.cssText = "position:absolute;opacity:0;width:0;height:0;";
-      document.body.appendChild(picker);
-      picker.addEventListener("input", () => {
-        pushUndo();
-        state.nodeLabelColors[nodeId] = picker.value;
-        swatch.style.background = picker.value;
-        invalidateRenderCache();
-        renderTree();
-      });
-      picker.addEventListener("change", () => picker.remove());
-      picker.click();
-    });
+    swatch.addEventListener("click", () => openColorSwatchPicker(swatch, {
+      initial: state.nodeLabelColors[nodeId],
+      onPick: value => { state.nodeLabelColors[nodeId] = value; },
+    }));
 
     // Clickable label text for renaming
     const text = document.createElement("span");
@@ -1106,23 +1145,11 @@ function buildTipLabelList() {
     swatch.className = "tip-label-swatch";
     swatch.style.background = marker.color || "#333";
     swatch.title = "Click to change color";
-    swatch.addEventListener("click", () => {
-      const picker = document.createElement("input");
-      picker.type = "color";
-      picker.value = marker.color || "#333333";
-      picker.style.cssText = "position:absolute;opacity:0;width:0;height:0;";
-      document.body.appendChild(picker);
-      picker.addEventListener("input", () => {
-        pushUndo();
-        marker.color = picker.value;
-        swatch.style.background = picker.value;
-        invalidateRenderCache();
-        renderTree();
-        updateTipLabelInput();
-      });
-      picker.addEventListener("change", () => picker.remove());
-      picker.click();
-    });
+    swatch.addEventListener("click", () => openColorSwatchPicker(swatch, {
+      initial: marker.color,
+      onPick: value => { marker.color = value; },
+      onDone: () => updateTipLabelInput(),
+    }));
 
     // Icon picker
     const iconSelect = document.createElement("select");
@@ -1493,9 +1520,7 @@ function restoreState(snapshot) {
   state.triangleScale = snapshot.triangleScale ?? state.triangleScale;
   state.uniformTriangles = snapshot.uniformTriangles ?? state.uniformTriangles;
   state.fastMode = snapshot.fastMode ?? state.fastMode;
-  state.nodeById = {};
-  state.parentMap = {};
-  indexNodes(state.treeData);
+  reindexTree(state.treeData);
   updateSubtreeModeUi();
   refreshExperimentalHighlightsAndInfo();
   // Sync UI controls to restored state
@@ -1551,9 +1576,7 @@ function openSubtree(nodeId) {
   pushUndo();
   if (state.fullTreeData === null) state.fullTreeData = state.treeData;
   state.treeData = deepCopyNode(state.nodeById[nodeId]);
-  state.nodeById = {};
-  state.parentMap = {};
-  indexNodes(state.treeData);
+  reindexTree(state.treeData);
   state.collapsedNodes.clear();
   state.scale = 1;
   state.tx = 20;
@@ -1583,9 +1606,7 @@ function rerootAt(nodeId) {
   }
 
   state.treeData = newRoot;
-  state.nodeById = {};
-  state.parentMap = {};
-  indexNodes(state.treeData);
+  reindexTree(state.treeData);
   state.collapsedNodes.clear();
   state.selectedTip = null;
   state.exportNodeId = null;
@@ -1607,9 +1628,7 @@ function restoreFullTree() {
   pushUndo();
   state.treeData = state.fullTreeData;
   state.fullTreeData = null;
-  state.nodeById = {};
-  state.parentMap = {};
-  indexNodes(state.treeData);
+  reindexTree(state.treeData);
   state.scale = 1;
   state.tx = 20;
   state.ty = 20;
@@ -1955,10 +1974,7 @@ function searchMotif() {
     return;
   }
 
-  const matched = Object.entries(state.proteinSeqsUngapped)
-    .filter(([, seq]) => compiled.test(seq))
-    .map(([tip]) => tip)
-    .sort();
+  const matched = matchTipsByRegex(compiled);
 
   const color = MOTIF_PALETTE[state.motifList.length % MOTIF_PALETTE.length];
   state.motifList.push({ pattern, type, tipNames: matched, color });
@@ -2256,9 +2272,7 @@ async function loadSessionV2(session, fromSetup) {
     state.speciesColors[species] = PALETTE[index % PALETTE.length];
   });
 
-  state.nodeById = {};
-  state.parentMap = {};
-  indexNodes(state.treeData);
+  reindexTree(state.treeData);
 
   buildSpeciesList(speciesList);
   buildExcludeSpeciesList(speciesList);
@@ -2272,28 +2286,7 @@ async function loadSessionV2(session, fromSetup) {
   refreshExperimentalHighlightsAndInfo();
 
   // Restore motifs locally
-  state.motifList = [];
-  if (session.motifList && state.proteinSeqsUngapped) {
-    for (const motif of session.motifList) {
-      let regexStr;
-      if (motif.type === "prosite") {
-        try { regexStr = prositeToRegex(motif.pattern); } catch { continue; }
-      } else {
-        regexStr = motif.pattern;
-      }
-      try {
-        const compiled = new RegExp(regexStr, "i");
-        const matched = Object.entries(state.proteinSeqsUngapped)
-          .filter(([, seq]) => compiled.test(seq))
-          .map(([tip]) => tip)
-          .sort();
-        const color = MOTIF_PALETTE[state.motifList.length % MOTIF_PALETTE.length];
-        state.motifList.push({ pattern: motif.pattern, type: motif.type, tipNames: matched, color });
-      } catch { /* skip invalid patterns */ }
-    }
-    rebuildMotifMatches();
-    buildMotifList();
-  }
+  restoreMotifsFromSession(session);
 
   // Restore heatmaps
   clearHeatmapDatasets();
@@ -2329,28 +2322,7 @@ function loadSessionV1(session, fromSetup) {
   applySessionSettings(session);
 
   // Restore motifs locally
-  state.motifList = [];
-  if (session.motifList && state.proteinSeqsUngapped) {
-    for (const motif of session.motifList) {
-      let regexStr;
-      if (motif.type === "prosite") {
-        try { regexStr = prositeToRegex(motif.pattern); } catch { continue; }
-      } else {
-        regexStr = motif.pattern;
-      }
-      try {
-        const compiled = new RegExp(regexStr, "i");
-        const matched = Object.entries(state.proteinSeqsUngapped)
-          .filter(([, seq]) => compiled.test(seq))
-          .map(([tip]) => tip)
-          .sort();
-        const color = MOTIF_PALETTE[state.motifList.length % MOTIF_PALETTE.length];
-        state.motifList.push({ pattern: motif.pattern, type: motif.type, tipNames: matched, color });
-      } catch { /* skip */ }
-    }
-    rebuildMotifMatches();
-    buildMotifList();
-  }
+  restoreMotifsFromSession(session);
 
   clearHeatmapDatasets();
   if (session.activeHeatmaps) {
@@ -2835,9 +2807,7 @@ function initAfterLoad() {
     state.speciesColors[species] = PALETTE[index % PALETTE.length];
   });
 
-  state.nodeById = {};
-  state.parentMap = {};
-  indexNodes(state.treeData);
+  reindexTree(state.treeData);
   refreshExperimentalHighlightsAndInfo();
 
   const totalTips = countAllTips(state.treeData);
@@ -3190,7 +3160,7 @@ function onTreeClick(event) {
   const tipName = el.dataset?.tip;
   if (tipName) {
     if (event.ctrlKey && event.shiftKey) {
-      const node = Object.values(state.nodeById).find(n => n.name === tipName);
+      const node = state.tipByName[tipName];
       if (node) rerootAt(node.id);
       return;
     }
