@@ -1,4 +1,5 @@
-export const state = {
+function createInitialState() {
+  return {
   // Data loading
   loaded: false,
   gene: null,
@@ -12,6 +13,7 @@ export const state = {
   fullTreeData: null,
   nodeById: {},
   parentMap: {},
+  tipByName: {},
 
   // Protein sequences (client-side)
   proteinSeqs: null,
@@ -87,7 +89,10 @@ export const state = {
 
   // Staged files from picker (before Load)
   stagedFiles: null,
-};
+  };
+}
+
+export const state = createInitialState();
 
 export const dom = {
   svg: document.getElementById("tree-svg"),
@@ -141,67 +146,8 @@ export function getInlineStyles() {
 }
 
 export function resetClientState() {
-  state.loaded = false;
-  state.gene = null;
-  state.nwkName = null;
-  state.aaName = null;
-  state.numSeqs = 0;
-  state.numSpecies = 0;
-  state.treeData = null;
-  state.fullTreeData = null;
-  state.nodeById = {};
-  state.parentMap = {};
-  state.proteinSeqs = null;
-  state.proteinSeqsUngapped = null;
-  state.sourceTexts = null;
-  state.datasetFiles = [];
-  state.datasetTextsByName = {};
-  state.parsedDatasets = {};
-  state.activeHeatmaps = [];
-  state.experimentalAnalysis = null;
-  state.experimentalMatches = [];
-  state.experimentalNodes = new Set();
-  state.speciesMap = {};
-  state.tipToSpecies = {};
-  state.speciesColors = {};
-  state.allTipNames = [];
-  state.tipLengths = {};
-  state.hasFasta = false;
-  state.selectedNodeTips = [];
-  state.selectedTip = null;
-  state.exportNodeId = null;
-  state.nameMatches = new Set();
-  state.selectedNameTips = new Set();
-  state.motifMatches = new Set();
-  state.sharedNodes = new Set();
-  state.motifList = [];
-  state.collapsedNodes = new Set();
-  state.hiddenTips = new Set();
-  state.nodeLabels = {};
-  state.nodeLabelIcons = {};
-  state.nodeLabelColors = {};
-  state.labelFontSize = 10;
-  state.tipMarkers = {};
-  state.layoutMode = "rectangular";
-  state.usePhylogram = true;
-  state.showTipLabels = true;
-  state.tipLabelSize = 10;
-  state.dotSize = 3;
-  state.showBootstraps = false;
-  state.showLengths = false;
-  state.tipSpacing = 16;
-  state.triangleScale = 100;
-  state.uniformTriangles = false;
-  state.fastMode = false;
-  state.scale = 1;
-  state.tx = 20;
-  state.ty = 20;
-  state.dragging = false;
-  state.dragStartX = 0;
-  state.dragStartY = 0;
-  state.renderCache = null;
-  state.renderCacheKey = null;
-  state.undoStack = [];
-  state.redoStack = [];
-  state.stagedFiles = null;
+  // Overwrite every field with a fresh copy of the defaults. Deriving the
+  // reset from the same factory that seeds `state` keeps the two in sync, so
+  // adding a state field never requires a matching edit here.
+  Object.assign(state, createInitialState());
 }

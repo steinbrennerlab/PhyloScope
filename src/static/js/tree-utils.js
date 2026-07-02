@@ -45,7 +45,23 @@ export function deepCopyNode(node) {
 export function indexNodes(node, parent) {
   state.nodeById[node.id] = node;
   if (parent) state.parentMap[node.id] = parent;
-  if (node.ch) node.ch.forEach(child => indexNodes(child, node));
+  if (!node.ch || node.ch.length === 0) {
+    state.tipByName[node.name] = node;
+  } else {
+    node.ch.forEach(child => indexNodes(child, node));
+  }
+}
+
+/**
+ * Reset the node/parent/tip indexes and rebuild them for `root`.
+ * Every place that swaps in a new tree (load, reroot, subtree focus, undo)
+ * needs the same three indexes rebuilt together, so they go through here.
+ */
+export function reindexTree(root) {
+  state.nodeById = {};
+  state.parentMap = {};
+  state.tipByName = {};
+  indexNodes(root);
 }
 
 export function getNodeColor(node, checkedSpecies) {
@@ -56,12 +72,8 @@ export function getNodeColor(node, checkedSpecies) {
 }
 
 export function findLCA(tipA, tipB) {
-  let nodeA = null;
-  let nodeB = null;
-  for (const node of Object.values(state.nodeById)) {
-    if (node.name === tipA && (!node.ch || node.ch.length === 0)) nodeA = node;
-    if (node.name === tipB && (!node.ch || node.ch.length === 0)) nodeB = node;
-  }
+  const nodeA = state.tipByName[tipA];
+  const nodeB = state.tipByName[tipB];
   if (!nodeA || !nodeB) return null;
 
   const ancestorsA = new Set();
@@ -84,16 +96,8 @@ export function patristicDistance(tipA, tipB) {
   if (!lca) return null;
 
   function distToNode(tipName, targetId) {
-    let node = null;
-    for (const candidate of Object.values(state.nodeById)) {
-      if (candidate.name === tipName && (!candidate.ch || candidate.ch.length === 0)) {
-        node = candidate;
-        break;
-      }
-    }
-    if (!node) return 0;
+    let current = state.tipByName[tipName];
     let dist = 0;
-    let current = node;
     while (current && current.id !== targetId) {
       dist += current.bl || 0;
       current = state.parentMap[current.id];
