@@ -44,7 +44,7 @@ npm install    # one-time: installs esbuild
 npm run build  # bundles to docs/
 ```
 
-Requires Node.js 16+.
+Requires Node.js 18+.
 
 ## Getting Started
 
@@ -106,7 +106,7 @@ An example dataset is provided in `example_data/`.
 - Buttons in the sticky Loaded Data panel; stack capped at 20 entries
 
 ### Node Selection
-- **Click** an internal node to select it — the node appears as a larger black dot with a red ring
+- **Click** an internal node to select it — the node is marked with a red selection ring
 - The aligned FASTA for the subtree is automatically copied to the clipboard
 - The sidebar shows species counts per selected node, and motif entries show per-node match counts with matching sequence names
 
@@ -137,11 +137,13 @@ An example dataset is provided in `example_data/`.
 - 40-color palette auto-assigned to species
 
 ### Experimental Analysis
-- Optional load-time import of a root-level JSON file containing split leaf sets
+- Select one or more experimental JSON files during setup; folder-based loading supports JSON files in subfolders and provides **Select all** / **Clear** controls
+- Supports both top-level `splits` arrays and nested JSON structures; any object exposing `slow_leaves` and/or `fast_leaves` is treated as a split entry
+- Multiple files are combined in selection order while retaining their source names; source-qualified labels such as `runs/model-a.json :: split_0022 slow` keep overlapping split IDs unambiguous
 - Exact clade matching uses descendant tip labels rather than parser node numbers, so highlights survive reloads and current-tree reindexing
 - Matching nodes are highlighted on the tree and listed in the sidebar with clickable entries
 - Match counts update for the currently open tree view, including subtree mode
-- `Label matched clades` imports labels like `split_0022 slow` onto the matched nodes using the standard clade-label system
+- `Label matched clades` imports matches into the standard clade-label system; when several matches resolve to the same node, their labels are combined instead of overwriting one another
 
 ### Name Search
 - Regex search against tip names (case-insensitive)
@@ -222,7 +224,7 @@ An example dataset is provided in `example_data/`.
   - **Copy to clipboard**: copy the Newick string directly
 
 ### Session Save / Load
-- **Save session**: downloads a self-contained JSON file with all source data (tree, alignment, species files, datasets) and full UI state — collapsed nodes, clade labels, species selections, motif searches, tip filters, layout settings, zoom/pan, rerooted tree state
+- **Save session**: downloads a self-contained JSON file with all source data (tree, alignment, species files, datasets, and selected experimental JSON files) and full UI state — collapsed nodes, clade labels, species selections, motif searches, tip filters, layout settings, zoom/pan, rerooted tree state
 - **Load session**: pick a session file to restore all state; also available from the setup dialog
 - Sessions are self-contained — they include the original data, so they can be loaded without access to the original files
 - Old v1 sessions (from the server-based version) are supported as best-effort import: UI settings are applied after you load the source files manually
@@ -266,6 +268,7 @@ src/
     svg2pdf.umd.min.js # svg2pdf.js library (bundled)
     js/
       actions.js      # UI actions, setup flow, and event wiring
+      experimental-analysis.js # Experimental JSON normalization and split extraction
       file-loader.js  # File picker handling and data loading
       parsers.js      # Newick, FASTA, PROSITE, and dataset parsers
       renderer.js     # Tree layout/rendering and export SVG helpers
