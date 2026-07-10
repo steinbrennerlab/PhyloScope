@@ -56,7 +56,7 @@ On launch, a setup dialog lets you load your data:
 
 After selecting files, PhyloScope detects and categorizes them. Choose the tree and alignment files from the dropdowns if multiple are present, then click **Load**. Alignment files can use any root-level FASTA filename; if a `*.aa.fa` file is present, it is selected by default.
 By default, species labels come from `orthofinder-input/*.fa` when present. You can switch the setup dialog to **Infer from tip labels**; the default inference rule uses the first two leading letters of each tip label, and you can override it with your own regex/replacement rule.
-An optional experimental JSON file can also be selected at load time. If you use the folder picker, JSON files can live in subfolders and are shown by relative path in the setup dialog. When present, PhyloScope matches each `slow_leaves` / `fast_leaves` tip set exactly against descendant clades in the currently open tree view and highlights the matching nodes.
+Optional experimental JSON files can also be selected at load time. If you use the folder picker, JSON files can live in subfolders and are shown by relative path in the setup dialog. You can check one or more of them within the experimental-file picker, and PhyloScope will combine them inside the experimental feature without affecting the core tree/alignment load flow. When present, PhyloScope matches each `slow_leaves` / `fast_leaves` tip set exactly against descendant clades in the currently open tree view and highlights the matching nodes. Both flat `splits` JSON files and nested split JSON structures are supported as long as the split objects expose `slow_leaves` and/or `fast_leaves`.
 
 ## Input Folder Structure
 
@@ -67,7 +67,7 @@ Point PhyloScope at any folder containing:
 | `*.nwk` | Newick tree (exactly one, required) |
 | `*.aa.fa` | Preferred default gapped protein alignment filename (optional) |
 | `*.fa` / `*.fasta` | Other root-level protein alignment filenames also accepted (optional) |
-| `*.json` | Optional experimental rate-shift split file with `splits[].slow_leaves` / `splits[].fast_leaves`; can be in a subfolder when using the folder picker (optional) |
+| `*.json` | Optional experimental rate-shift split file(s); flat or nested split objects are supported when they expose `slow_leaves` / `fast_leaves`, and the files can be in subfolders when using the folder picker (optional) |
 | `orthofinder-input/*.fa` | Per-species FASTA files for tip-to-species mapping when using the orthofinder species source (optional) |
 | `dataset/*.txt` | Tab-delimited tip datasets for rectangular heatmap display (optional) |
 

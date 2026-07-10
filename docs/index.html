@@ -65,11 +65,16 @@
         <label class="detected-label">Datasets:</label>
         <span id="detected-datasets" class="detected-status">&mdash;</span>
       </div>
-      <div class="detected-row">
-        <label class="detected-label" for="detected-experimental">Experimental JSON:</label>
-        <select id="detected-experimental" class="detected-select">
-          <option value="">None</option>
-        </select>
+      <div class="detected-row detected-row-top">
+        <label class="detected-label">Experimental JSON:</label>
+        <div class="detected-experimental-panel">
+          <div id="detected-experimental-hint" class="setup-inline-hint">none found</div>
+          <div id="detected-experimental-controls" class="setup-inline-actions" style="display:none;">
+            <button id="detected-experimental-select-all" type="button" class="btn-sm">Select all</button>
+            <button id="detected-experimental-clear" type="button" class="btn-sm">Clear</button>
+          </div>
+          <div id="detected-experimental-list" class="setup-checkbox-list"></div>
+        </div>
       </div>
     </div>
     <div id="setup-load-row" style="display:none;">
@@ -87,7 +92,7 @@
     *.fa / *.fasta       &mdash; Other protein alignment names also accepted
     orthofinder-input/   &mdash; Folder of per-species FASTA files (optional)
     dataset/             &mdash; Tab-delimited heatmap data (optional)
-    *.json               &mdash; Experimental rate-shift split import (optional)</pre>
+    *.json               &mdash; Experimental rate-shift split import(s) (optional)</pre>
     </div>
   </div>
 </div>

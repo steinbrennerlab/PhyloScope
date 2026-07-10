@@ -180,6 +180,12 @@ function getFilePickerKey(file) {
   return String(file?.webkitRelativePath || file?.name || "").replace(/\\/g, "/");
 }
 
+function getExperimentalSourceOrder(sourceName) {
+  const sources = state.experimentalAnalysis?.sources || [];
+  const source = sources.find(entry => entry.name === sourceName);
+  return source ? source.sourceIndex : Number.MAX_SAFE_INTEGER;
+}
+
 function mergeSortedLeafNames(left, right) {
   if (left.length === 0) return right.slice();
   if (right.length === 0) return left.slice();
@@ -343,7 +349,7 @@ function updateExperimentalAnalysisUi() {
     item.className = "name-match-item";
     item.dataset.nodeid = match.nodeId;
     item.dataset.experimentalKey = match.key;
-    item.textContent = `${match.splitId} ${match.side} - Node #${match.nodeId} - ${match.tipCount} tips`;
+    item.textContent = `${match.displayLabel} - Node #${match.nodeId} - ${match.tipCount} tips`;
     item.addEventListener("click", () => selectExperimentalNode(match.nodeId));
     listEl.appendChild(item);
   });
@@ -357,19 +363,52 @@ function labelExperimentalClades() {
   }
 
   pushUndo();
-  let labeledCount = 0;
+  const labelsByNode = new Map();
   state.experimentalMatches.forEach(match => {
     if (!state.nodeById[match.nodeId]) return;
-    state.nodeLabels[match.nodeId] = `${match.splitId} ${match.side}`;
+    const labels = labelsByNode.get(match.nodeId) || [];
+    if (!labels.includes(match.displayLabel)) labels.push(match.displayLabel);
+    labelsByNode.set(match.nodeId, labels);
+  });
+
+  let labeledCount = 0;
+  labelsByNode.forEach((labels, nodeId) => {
+    state.nodeLabels[nodeId] = labels.join(" | ");
     labeledCount++;
   });
 
   document.getElementById("experimental-analysis-label-result").textContent =
-    `${labeledCount} clade${labeledCount === 1 ? "" : "s"} labeled from experimental matches.`;
+    `${labeledCount} clade${labeledCount === 1 ? "" : "s"} labeled from ${state.experimentalMatches.length} experimental match${state.experimentalMatches.length === 1 ? "" : "es"}.`;
   invalidateRenderCache();
   renderTree();
   buildLabelList();
   updateLabelInput();
+}
+
+function compareExperimentalMatchEntries(a, b) {
+  if ((a.sourceIndex ?? 0) !== (b.sourceIndex ?? 0)) {
+    return (a.sourceIndex ?? 0) - (b.sourceIndex ?? 0);
+  }
+  const aHasSplitNumber = Number.isFinite(a.splitNumber);
+  const bHasSplitNumber = Number.isFinite(b.splitNumber);
+  if (aHasSplitNumber && bHasSplitNumber && a.splitNumber !== b.splitNumber) {
+    return a.splitNumber - b.splitNumber;
+  }
+  if (aHasSplitNumber !== bHasSplitNumber) {
+    return aHasSplitNumber ? -1 : 1;
+  }
+  if ((a.sideOrder ?? 0) !== (b.sideOrder ?? 0)) {
+    return (a.sideOrder ?? 0) - (b.sideOrder ?? 0);
+  }
+  const splitCompare = String(a.splitId || "").localeCompare(String(b.splitId || ""), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+  if (splitCompare !== 0) return splitCompare;
+  return String(a.displayLabel || "").localeCompare(String(b.displayLabel || ""), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
 }
 
 function refreshExperimentalHighlights() {
@@ -397,6 +436,7 @@ function refreshExperimentalHighlights() {
     });
   });
 
+  matches.sort(compareExperimentalMatchEntries);
   state.experimentalNodes = experimentalNodes;
   state.experimentalMatches = matches;
   updateExperimentalAnalysisUi();
@@ -822,11 +862,13 @@ const LABEL_ICONS = [
 ];
 
 function parseExperimentalNodeLabel(label) {
-  const match = /^split_(\d+)\s+(slow|fast)\b/i.exec(String(label || "").trim());
+  const primaryLabel = String(label || "").split("|")[0].trim();
+  const match = /^(?:(.+?)\s+::\s+)?split_(\d+)\s+(slow|fast)\b/i.exec(primaryLabel);
   if (!match) return null;
   return {
-    splitNumber: Number(match[1]),
-    sideOrder: match[2].toLowerCase() === "slow" ? 0 : 1,
+    sourceName: match[1] ? match[1].trim() : "",
+    splitNumber: Number(match[2]),
+    sideOrder: match[3].toLowerCase() === "slow" ? 0 : 1,
   };
 }
 
@@ -835,6 +877,11 @@ function compareNodeLabelEntries([nodeIdA, labelA], [nodeIdB, labelB]) {
   const experimentalB = parseExperimentalNodeLabel(labelB);
 
   if (experimentalA && experimentalB) {
+    const sourceOrderA = getExperimentalSourceOrder(experimentalA.sourceName);
+    const sourceOrderB = getExperimentalSourceOrder(experimentalB.sourceName);
+    if (sourceOrderA !== sourceOrderB) {
+      return sourceOrderA - sourceOrderB;
+    }
     if (experimentalA.splitNumber !== experimentalB.splitNumber) {
       return experimentalA.splitNumber - experimentalB.splitNumber;
     }
@@ -2640,6 +2687,69 @@ async function exportPDFWithInfo() {
 // File selection handling
 // ---------------------------------------------------------------------------
 
+function getExperimentalSelectionInputs() {
+  return [...dom.detectedExperimentalList.querySelectorAll('input[data-experimental-file="true"]')];
+}
+
+function updateExperimentalSelectionUi() {
+  const inputs = getExperimentalSelectionInputs();
+  const selectedCount = inputs.filter(input => input.checked).length;
+
+  if (inputs.length === 0) {
+    dom.detectedExperimentalHint.textContent = "none found";
+    dom.detectedExperimentalControls.style.display = "none";
+    return;
+  }
+
+  dom.detectedExperimentalControls.style.display = inputs.length > 1 ? "" : "none";
+  if (inputs.length === 1) {
+    dom.detectedExperimentalHint.textContent = selectedCount === 1 ? "1 file selected" : "1 file found";
+    return;
+  }
+
+  dom.detectedExperimentalHint.textContent = selectedCount > 0
+    ? `${selectedCount}/${inputs.length} files selected`
+    : `${inputs.length} files found. Check the ones to load.`;
+}
+
+function setExperimentalFileSelections(checked) {
+  getExperimentalSelectionInputs().forEach(input => {
+    input.checked = checked;
+  });
+  updateExperimentalSelectionUi();
+}
+
+function getSelectedExperimentalFileKeys() {
+  return getExperimentalSelectionInputs()
+    .filter(input => input.checked)
+    .map(input => input.value);
+}
+
+function populateExperimentalFileList(files) {
+  dom.detectedExperimentalList.innerHTML = "";
+
+  files.forEach(file => {
+    const row = document.createElement("label");
+    row.className = "setup-checkbox-row";
+
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = getFilePickerKey(file);
+    input.dataset.experimentalFile = "true";
+    input.checked = files.length === 1;
+    input.addEventListener("change", updateExperimentalSelectionUi);
+
+    const text = document.createElement("span");
+    text.textContent = getFilePickerKey(file);
+
+    row.appendChild(input);
+    row.appendChild(text);
+    dom.detectedExperimentalList.appendChild(row);
+  });
+
+  updateExperimentalSelectionUi();
+}
+
 function handleFilesSelected(files) {
   const detected = detectFiles(files);
   state.stagedFiles = { detected, allFiles: files };
@@ -2683,23 +2793,7 @@ function handleFilesSelected(files) {
     aaSelect.value = detected.aaFiles[0].name;
   }
 
-  // Experimental JSON select
-  const experimentalSelect = dom.detectedExperimentalSelect;
-  experimentalSelect.innerHTML = "";
-  const experimentalNoneOpt = document.createElement("option");
-  experimentalNoneOpt.value = "";
-  experimentalNoneOpt.textContent = "None";
-  experimentalSelect.appendChild(experimentalNoneOpt);
-  detected.analysisFiles.forEach(f => {
-    const opt = document.createElement("option");
-    const fileKey = getFilePickerKey(f);
-    opt.value = fileKey;
-    opt.textContent = fileKey;
-    experimentalSelect.appendChild(opt);
-  });
-  if (detected.analysisFiles.length === 1) {
-    experimentalSelect.value = getFilePickerKey(detected.analysisFiles[0]);
-  }
+  populateExperimentalFileList(detected.analysisFiles);
 
   // Orthofinder
   dom.detectedOrthoSpan.textContent = detected.orthoFiles.length > 0
@@ -2729,7 +2823,7 @@ async function doSetupLoad() {
   const detected = state.stagedFiles.detected;
   const nwkName = dom.detectedNwkSelect.value;
   const aaName = dom.detectedAaSelect.value;
-  const experimentalName = dom.detectedExperimentalSelect.value;
+  const experimentalNames = new Set(getSelectedExperimentalFileKeys());
   const speciesConfig = getSetupSpeciesConfig();
 
   if (!nwkName) {
@@ -2739,9 +2833,7 @@ async function doSetupLoad() {
 
   const nwkFile = detected.nwkFiles.find(f => f.name === nwkName);
   const aaFile = aaName ? detected.aaFiles.find(f => f.name === aaName) : null;
-  const experimentalFile = experimentalName
-    ? detected.analysisFiles.find(f => getFilePickerKey(f) === experimentalName)
-    : null;
+  const experimentalFiles = detected.analysisFiles.filter(f => experimentalNames.has(getFilePickerKey(f)));
 
   dom.setupError.textContent = "";
   dom.setupLoadBtn.disabled = true;
@@ -2753,7 +2845,7 @@ async function doSetupLoad() {
       aaFile: aaFile || null,
       orthoFiles: detected.orthoFiles,
       datasetFiles: detected.datasetFiles,
-      experimentalFile: experimentalFile || null,
+      experimentalFiles,
       speciesConfig,
     });
 
@@ -2856,6 +2948,9 @@ function showSetup() {
   dom.setupOverlay.style.display = "flex";
   dom.detectedFilesPanel.style.display = "none";
   dom.setupLoadRow.style.display = "none";
+  dom.detectedExperimentalList.innerHTML = "";
+  dom.detectedExperimentalHint.textContent = "none found";
+  dom.detectedExperimentalControls.style.display = "none";
   state.stagedFiles = null;
   updateSpeciesSourceSetupUi();
 }
@@ -2893,6 +2988,8 @@ function bindStartupControls() {
     }
   });
   dom.speciesSourceSelect.addEventListener("change", updateSpeciesSourceSetupUi);
+  dom.detectedExperimentalSelectAllBtn.addEventListener("click", () => setExperimentalFileSelections(true));
+  dom.detectedExperimentalClearBtn.addEventListener("click", () => setExperimentalFileSelections(false));
 
   document.getElementById("setup-load-session").addEventListener("click", () => loadSession(true));
   dom.setupLoadBtn.addEventListener("click", doSetupLoad);

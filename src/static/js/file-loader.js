@@ -11,6 +11,10 @@ import {
   DEFAULT_SPECIES_INFER_PATTERN,
   DEFAULT_SPECIES_INFER_REPLACEMENT,
 } from "./tree-ops.js";
+import {
+  normalizeExperimentalSources,
+  parseExperimentalAnalysisSources,
+} from "./experimental-analysis.js";
 
 function isFastaFileName(name) {
   const lower = name.toLowerCase();
@@ -47,59 +51,6 @@ function normalizeSpeciesConfig(speciesConfig = {}) {
     mode: speciesConfig.mode === "tip-labels" ? "tip-labels" : "orthofinder",
     pattern: speciesConfig.pattern || DEFAULT_SPECIES_INFER_PATTERN,
     replacement: speciesConfig.replacement ?? DEFAULT_SPECIES_INFER_REPLACEMENT,
-  };
-}
-
-function buildCladeSignature(leaves) {
-  return leaves.join("\u001f");
-}
-
-function normalizeLeaves(leaves) {
-  if (!Array.isArray(leaves)) return [];
-  return [...new Set(leaves.map(value => String(value).trim()).filter(Boolean))].sort();
-}
-
-function parseExperimentalAnalysisText(name, text) {
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch (error) {
-    throw new Error(`Experimental JSON parse failed for ${name}: ${error.message}`);
-  }
-
-  if (!parsed || !Array.isArray(parsed.splits)) {
-    throw new Error(`Experimental JSON ${name} is missing a top-level "splits" array`);
-  }
-
-  const clades = [];
-  parsed.splits.forEach((split, index) => {
-    const splitId = split?.split_id || `split_${String(index + 1).padStart(4, "0")}`;
-    [
-      ["slow", split?.slow_leaves],
-      ["fast", split?.fast_leaves],
-    ].forEach(([side, leaves]) => {
-      const normalizedLeaves = normalizeLeaves(leaves);
-      if (normalizedLeaves.length === 0) return;
-      clades.push({
-        key: `${splitId}:${side}`,
-        splitId,
-        side,
-        tipCount: normalizedLeaves.length,
-        signature: buildCladeSignature(normalizedLeaves),
-        leaves: normalizedLeaves,
-      });
-    });
-  });
-
-  if (clades.length === 0) {
-    throw new Error(`Experimental JSON ${name} did not contain any usable slow/fast leaf lists`);
-  }
-
-  return {
-    name,
-    splitCount: parsed.splits.length,
-    cladeCount: clades.length,
-    clades,
   };
 }
 
@@ -178,17 +129,21 @@ export function detectFiles(files) {
  * @param {File|null} opts.aaFile - The protein alignment file (optional).
  * @param {File[]} opts.orthoFiles - Orthofinder species FASTA files.
  * @param {File[]} opts.datasetFiles - Dataset .txt files.
- * @param {File|null} opts.experimentalFile - Experimental analysis JSON file.
+ * @param {File[]} opts.experimentalFiles - Experimental analysis JSON files.
  * @param {{mode?: string, pattern?: string, replacement?: string}} opts.speciesConfig
  * @returns {Promise<{ success: boolean, error?: string, result?: object }>}
  */
-export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles, experimentalFile, speciesConfig }) {
+export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles, experimentalFiles, speciesConfig }) {
   if (!nwkFile) return { success: false, error: "No tree file (.nwk) selected." };
 
   const nwkText = await nwkFile.text();
   const aaText = aaFile ? await aaFile.text() : null;
-  const experimentalText = experimentalFile ? await experimentalFile.text() : null;
-  const experimentalName = experimentalFile ? getFileLabel(experimentalFile) : null;
+  const experimentalSources = experimentalFiles && experimentalFiles.length > 0
+    ? await Promise.all(experimentalFiles.map(async file => ({
+      name: getFileLabel(file),
+      text: await file.text(),
+    })))
+    : [];
   const filteredOrthoFiles = (orthoFiles || []).filter(f => !isSameSelectedFile(f, aaFile));
   const orthoTexts = filteredOrthoFiles.length > 0
     ? await Promise.all(filteredOrthoFiles.map(async f => ({ name: f.name, text: await f.text() })))
@@ -201,9 +156,9 @@ export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles,
   const gene = nwkFile.name.replace(/\.nwk$/, "");
   const resolvedSpeciesConfig = normalizeSpeciesConfig(speciesConfig);
   let experimentalAnalysis = null;
-  if (experimentalText) {
+  if (experimentalSources.length > 0) {
     try {
-      experimentalAnalysis = parseExperimentalAnalysisText(experimentalName, experimentalText);
+      experimentalAnalysis = parseExperimentalAnalysisSources(experimentalSources);
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -265,7 +220,7 @@ export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles,
         speciesConfig: resolvedSpeciesConfig,
         ortho: orthoTexts,
         datasets: datasetTexts,
-        experimental: experimentalText ? { name: experimentalName, text: experimentalText } : null,
+        experimental: experimentalSources.length > 0 ? experimentalSources : null,
       },
     },
   };
@@ -281,12 +236,12 @@ export function loadFromSourceTexts(sourceTexts) {
   const orthoTexts = sourceTexts.ortho || [];
   const datasetTexts = sourceTexts.datasets || [];
   const resolvedSpeciesConfig = normalizeSpeciesConfig(sourceTexts.speciesConfig);
-  const experimentalSource = sourceTexts.experimental || null;
+  const experimentalSources = normalizeExperimentalSources(sourceTexts.experimental);
 
   const treeData = parseNewick(nwkText);
   const gene = (sourceTexts.nwkName || "tree.nwk").replace(/\.nwk$/, "");
-  const experimentalAnalysis = experimentalSource
-    ? parseExperimentalAnalysisText(experimentalSource.name || "experimental.json", experimentalSource.text || "")
+  const experimentalAnalysis = experimentalSources.length > 0
+    ? parseExperimentalAnalysisSources(experimentalSources)
     : null;
 
   let proteinSeqs = null;
