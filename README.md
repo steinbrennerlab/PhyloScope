@@ -21,7 +21,7 @@ The frontend is organized as small ES modules under `src/static/js/`, bundled in
 | Alignment export | Click-to-copy FASTA, subtree slicing, column ranges | No | No | Scriptable | No |
 | Click-to-copy | Tip FASTA + node aligned FASTA to clipboard | No | No | No | No |
 | Annotation | Species, bootstrap, motif highlights, sequence lengths, clade labels, tip labels | Very rich (heatmaps, domains, bars) | Moderate | Very rich | Basic (colors, fonts, line widths) |
-| Large trees (10k+) | Fast mode: batched SVG, auto-collapse, render cache | Optimized for large trees | Moderate | Good | Optimized (magnifier tool) |
+| Large trees (10k+) | Fast mode: compound SVG paths, adaptive labels, auto-collapse | Optimized for large trees | Moderate | Good | Optimized (magnifier tool) |
 | Undo/redo | Full undo/redo for tree operations | No | Limited | No | No |
 | Session persistence | Save/load all UI state + data to JSON | Server-side projects | Save to NEXUS | Scriptable | Save to file |
 | Tip filtering | Regex and species-based hide/show | Dataset filtering | Taxon filtering | Programmatic | Find/filter |
@@ -82,7 +82,7 @@ An example dataset is provided in `example_data/`.
 ### Tree Display
 - **Three layouts**: rectangular, circular (polar), unrooted (Felsenstein equal-angle)
 - **Branch lengths**: toggle phylogram vs cladogram
-- **Tip labels**: toggle on/off (auto-hidden for trees >1000 tips); tips always show a small colored dot
+- **Tip labels**: toggle on/off (auto-hidden for trees >1000 tips); large trees render only labels in or near the viewport and adapt label density to the current zoom while preserving selected and highlighted labels
 - **Sequence lengths**: toggle to show ungapped amino acid length next to each tip label
 - **Bootstrap values**: toggle display on internal nodes
 - **Tip spacing**: adjustable via slider
@@ -95,9 +95,9 @@ An example dataset is provided in `example_data/`.
 
 ### Fast Mode (Large Trees)
 - Auto-enables for trees with >1000 tips; manual toggle available
-- **Batched SVG rendering**: branches collapsed into single `<path>` elements per color, dots grouped — reduces DOM elements from ~5000-7000 to ~500-1500
-- **Simplified tip dots**: single color per tip (no pie charts), no labels or bootstrap values
-- **Render cache**: skips re-render when no relevant state has changed
+- **Batched SVG rendering**: branches and ordinary dots are collapsed into compound `<path>` elements, with viewport-sized interactive hit targets layered above them
+- **Adaptive labels**: selected, searched, motif-matched, and manually annotated tips remain visible while overlapping/offscreen labels are omitted from the live DOM; exports still include the complete label set
+- **Retained render layers**: geometry, labels, hit targets, and selection overlays update independently, so selecting a tip or changing label display does not rebuild the full tree
 - **Auto-collapse**: for trees >2000 tips, automatically collapses clades to show ~50 visible groups; shift-click to expand clades of interest
 
 ### Undo / Redo

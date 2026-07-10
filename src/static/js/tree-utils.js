@@ -1,11 +1,7 @@
 import { state } from "./state.js";
 
 export function getMotifColors(tipName) {
-  const colors = [];
-  for (const entry of state.motifList) {
-    if (entry.tipNames.includes(tipName)) colors.push(entry.color);
-  }
-  return colors;
+  return state.motifColorsByTip[tipName] || [];
 }
 
 export function isNodeHidden(node) {
@@ -23,6 +19,8 @@ export function countLeaves(node) {
 }
 
 export function countAllTips(node) {
+  const cached = state.subtreeTipCount[node.id];
+  if (cached != null && state.nodeById[node.id] === node) return cached;
   if (!node.ch) return 1;
   let total = 0;
   for (const child of node.ch) total += countAllTips(child);
@@ -42,25 +40,55 @@ export function deepCopyNode(node) {
   return copy;
 }
 
-export function indexNodes(node, parent) {
-  state.nodeById[node.id] = node;
-  if (parent) state.parentMap[node.id] = parent;
-  if (!node.ch || node.ch.length === 0) {
-    state.tipByName[node.name] = node;
-  } else {
-    node.ch.forEach(child => indexNodes(child, node));
-  }
-}
-
-/**
- * Reset the node/parent/tip indexes and rebuild them for `root`.
- * Every place that swaps in a new tree (load, reroot, subtree focus, undo)
- * needs the same three indexes rebuilt together, so they go through here.
- */
-export function reindexTree(root) {
+export function indexNodes(node) {
   state.nodeById = {};
   state.parentMap = {};
   state.tipByName = {};
+  state.subtreeTipCount = {};
+  state.subtreeLeafRange = {};
+  let leafIndex = 0;
+  const traversal = [];
+  const stack = [{ node, parent: null }];
+
+  while (stack.length > 0) {
+    const { node: current, parent: currentParent } = stack.pop();
+    traversal.push(current);
+    state.nodeById[current.id] = current;
+    if (currentParent) state.parentMap[current.id] = currentParent;
+
+    if (!current.ch || current.ch.length === 0) {
+      state.tipByName[current.name] = current;
+      state.subtreeLeafRange[current.id] = { start: leafIndex, end: leafIndex };
+      leafIndex++;
+      continue;
+    }
+
+    for (let i = current.ch.length - 1; i >= 0; i--) {
+      stack.push({ node: current.ch[i], parent: current });
+    }
+  }
+
+  for (let i = traversal.length - 1; i >= 0; i--) {
+    const current = traversal[i];
+    if (!current.ch || current.ch.length === 0) {
+      state.subtreeTipCount[current.id] = 1;
+      continue;
+    }
+    let tipCount = 0;
+    current.ch.forEach(child => {
+      tipCount += state.subtreeTipCount[child.id] || 0;
+    });
+    const firstRange = state.subtreeLeafRange[current.ch[0].id];
+    const lastRange = state.subtreeLeafRange[current.ch[current.ch.length - 1].id];
+    state.subtreeTipCount[current.id] = tipCount;
+    state.subtreeLeafRange[current.id] = { start: firstRange.start, end: lastRange.end };
+  }
+
+  state.treeRevision++;
+}
+
+/** Rebuild node, parent, tip, and subtree metadata indexes for `root`. */
+export function reindexTree(root) {
   indexNodes(root);
 }
 

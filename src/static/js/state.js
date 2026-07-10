@@ -14,6 +14,9 @@ function createInitialState() {
   nodeById: {},
   parentMap: {},
   tipByName: {},
+  subtreeTipCount: {},
+  subtreeLeafRange: {},
+  treeRevision: 0,
 
   // Protein sequences (client-side)
   proteinSeqs: null,
@@ -46,6 +49,7 @@ function createInitialState() {
   nameMatches: new Set(),
   selectedNameTips: new Set(),
   motifMatches: new Set(),
+  motifColorsByTip: {},
   sharedNodes: new Set(),
   motifList: [],
 

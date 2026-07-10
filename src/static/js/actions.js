@@ -9,8 +9,13 @@ import {
 import {
   applyTransform,
   buildExportSVGString,
+  centerNodeInView,
+  centerTipInView,
   configureRenderer,
   invalidateRenderCache,
+  refreshSelectionOverlay,
+  refreshTipLabels,
+  requestTreeRender,
   renderTree,
 } from "./renderer.js";
 import { parseDatasetText, prositeToRegex } from "./parsers.js";
@@ -104,8 +109,13 @@ function openColorSwatchPicker(swatch, { initial, onPick, onDone }) {
 
 function rebuildMotifMatches() {
   state.motifMatches = new Set();
+  state.motifColorsByTip = {};
   for (const entry of state.motifList) {
-    for (const tip of entry.tipNames) state.motifMatches.add(tip);
+    for (const tip of entry.tipNames) {
+      state.motifMatches.add(tip);
+      if (!state.motifColorsByTip[tip]) state.motifColorsByTip[tip] = [];
+      state.motifColorsByTip[tip].push(entry.color);
+    }
   }
 }
 
@@ -121,19 +131,20 @@ function matchTipsByRegex(compiled) {
 // the current alignment. Shared by the v1 and v2 session loaders.
 function restoreMotifsFromSession(session) {
   state.motifList = [];
-  if (!session.motifList || !state.proteinSeqsUngapped) return;
-  for (const motif of session.motifList) {
-    let regexStr;
-    if (motif.type === "prosite") {
-      try { regexStr = prositeToRegex(motif.pattern); } catch { continue; }
-    } else {
-      regexStr = motif.pattern;
+  if (session.motifList && state.proteinSeqsUngapped) {
+    for (const motif of session.motifList) {
+      let regexStr;
+      if (motif.type === "prosite") {
+        try { regexStr = prositeToRegex(motif.pattern); } catch { continue; }
+      } else {
+        regexStr = motif.pattern;
+      }
+      try {
+        const compiled = new RegExp(regexStr, "i");
+        const color = MOTIF_PALETTE[state.motifList.length % MOTIF_PALETTE.length];
+        state.motifList.push({ pattern: motif.pattern, type: motif.type, tipNames: matchTipsByRegex(compiled), color });
+      } catch { /* skip invalid patterns */ }
     }
-    try {
-      const compiled = new RegExp(regexStr, "i");
-      const color = MOTIF_PALETTE[state.motifList.length % MOTIF_PALETTE.length];
-      state.motifList.push({ pattern: motif.pattern, type: motif.type, tipNames: matchTipsByRegex(compiled), color });
-    } catch { /* skip invalid patterns */ }
   }
   rebuildMotifMatches();
   buildMotifList();
@@ -254,28 +265,7 @@ function syncNodeListActiveStates() {
 function centerSelectedNodeInView() {
   const targetNodeId = getActiveNodeId();
   if (targetNodeId == null) return;
-
-  const centerAttempt = attemptsLeft => {
-    requestAnimationFrame(() => {
-      const target = dom.group.querySelector(".selected-node-ring")
-        || dom.group.querySelector(`[data-nodeid="${targetNodeId}"]`);
-      if (!target) {
-        if (attemptsLeft > 0) centerAttempt(attemptsLeft - 1);
-        return;
-      }
-      const cxAttr = target.getAttribute("cx");
-      const cyAttr = target.getAttribute("cy");
-      if (cxAttr == null || cyAttr == null) return;
-      const cx = parseFloat(cxAttr);
-      const cy = parseFloat(cyAttr);
-      const rect = dom.svg.getBoundingClientRect();
-      state.tx = rect.width / 2 - cx * state.scale;
-      state.ty = rect.height / 2 - cy * state.scale;
-      applyTransform();
-    });
-  };
-
-  centerAttempt(1);
+  requestAnimationFrame(() => centerNodeInView(targetNodeId));
 }
 
 function expandCollapsedPathToNode(nodeId) {
@@ -1509,12 +1499,14 @@ function showLoadedInfo(totalTips) {
 
 function captureState() {
   return {
-    treeData: deepCopyNode(state.treeData),
+    // Tree operations replace topology objects, so view-state snapshots can
+    // share them instead of cloning every node on each control interaction.
+    treeData: state.treeData,
     collapsedNodes: new Set(state.collapsedNodes),
     exportNodeId: state.exportNodeId,
     selectedTip: state.selectedTip,
     speciesColors: { ...state.speciesColors },
-    fullTreeData: state.fullTreeData ? deepCopyNode(state.fullTreeData) : null,
+    fullTreeData: state.fullTreeData,
     scale: state.scale,
     tx: state.tx,
     ty: state.ty,
@@ -1641,7 +1633,9 @@ function openSubtree(nodeId) {
 
 function rerootAt(nodeId) {
   pushUndo();
-  const newRoot = rerootTree(state.treeData, nodeId);
+  // Rerooting mutates its input; clone only for this structural operation so
+  // lightweight undo snapshots can safely share all other tree objects.
+  const newRoot = rerootTree(deepCopyNode(state.treeData), nodeId);
   if (!newRoot) {
     setTooltip("Re-root failed: node not found");
     return;
@@ -1788,7 +1782,7 @@ function openExportPanel(nodeId) {
 
   updateSpeciesCounts();
   buildMotifList();
-  renderTree();
+  refreshSelectionOverlay();
   syncNodeListActiveStates();
 
   let missingTips = [];
@@ -1973,17 +1967,8 @@ function selectNameTip(tipName) {
   document.getElementById("name-result").textContent = `${state.nameMatches.size} tips matched`;
   renderNameMatchesList(Array.from(state.nameMatches));
   copyTipName(tipName);
-  invalidateRenderCache();
-  renderTree();
-  const ring = dom.group.querySelector(".selected-tip-ring");
-  if (ring) {
-    const cx = parseFloat(ring.getAttribute("cx"));
-    const cy = parseFloat(ring.getAttribute("cy"));
-    const rect = dom.svg.getBoundingClientRect();
-    state.tx = rect.width / 2 - cx * state.scale;
-    state.ty = rect.height / 2 - cy * state.scale;
-    applyTransform();
-  }
+  refreshTipLabels();
+  centerTipInView(tipName);
 }
 
 // ---------------------------------------------------------------------------
@@ -3042,25 +3027,25 @@ function setupControls() {
   sliderUndoOnce(tipSpacingEl);
   tipSpacingEl.addEventListener("input", event => {
     state.tipSpacing = +event.target.value;
-    renderTree();
+    requestTreeRender();
   });
   document.getElementById("tip-labels-toggle").addEventListener("change", event => {
     pushUndo();
     state.showTipLabels = event.target.checked;
-    renderTree();
+    refreshTipLabels();
   });
   const tipLabelSizeEl = document.getElementById("tip-label-size");
   sliderUndoOnce(tipLabelSizeEl);
   tipLabelSizeEl.addEventListener("input", event => {
     state.tipLabelSize = +event.target.value;
-    renderTree();
+    refreshTipLabels();
   });
   const dotSizeEl = document.getElementById("dot-size");
   sliderUndoOnce(dotSizeEl);
   dotSizeEl.addEventListener("input", event => {
     state.dotSize = +event.target.value;
     invalidateRenderCache();
-    renderTree();
+    requestTreeRender();
   });
   document.getElementById("bootstrap-toggle").addEventListener("change", event => {
     pushUndo();
@@ -3070,7 +3055,7 @@ function setupControls() {
   document.getElementById("length-toggle").addEventListener("change", event => {
     pushUndo();
     state.showLengths = event.target.checked;
-    renderTree();
+    refreshTipLabels();
   });
   document.getElementById("fast-mode-toggle").addEventListener("change", event => {
     pushUndo();
@@ -3087,7 +3072,7 @@ function setupControls() {
   sliderUndoOnce(triangleSizeEl);
   triangleSizeEl.addEventListener("input", event => {
     state.triangleScale = +event.target.value;
-    renderTree();
+    requestTreeRender();
   });
   document.querySelectorAll('input[name="layout"]').forEach(radio => {
     radio.addEventListener("change", event => {
@@ -3207,7 +3192,7 @@ function setupControls() {
   labelFontSizeEl.addEventListener("input", event => {
     state.labelFontSize = +event.target.value;
     invalidateRenderCache();
-    renderTree();
+    requestTreeRender();
   });
   document.getElementById("pairwise-compare-btn").addEventListener("click", comparePairwise);
   document.getElementById("session-save-btn").addEventListener("click", saveSession);
@@ -3268,8 +3253,7 @@ function onTreeClick(event) {
     state.selectedTip = tipName;
     copyTipName(tipName);
     updateTipLabelInput();
-    invalidateRenderCache();
-    renderTree();
+    refreshTipLabels();
     return;
   }
 

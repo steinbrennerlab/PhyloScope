@@ -53,6 +53,7 @@ input[type=text] { flex: 1; }
 
 .tip-label { cursor: pointer; }
 .tip-label:hover { font-weight: bold; }
+.tree-hit-target { cursor: pointer; pointer-events: all; }
 .node-dot { cursor: pointer; }
 .motif-match { stroke: #e22; stroke-width: 2; }
 .shared-node { fill: #ff6600; stroke: #c40; stroke-width: 1.5; }
