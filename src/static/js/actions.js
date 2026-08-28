@@ -3068,6 +3068,14 @@ function setupControls() {
     state.uniformTriangles = event.target.checked;
     renderTree();
   });
+  document.getElementById("expand-all-triangles").addEventListener("click", () => {
+    if (state.collapsedNodes.size === 0) return;
+    pushUndo();
+    state.collapsedNodes.clear();
+    invalidateRenderCache();
+    updateTriangleControls();
+    renderTree();
+  });
   const triangleSizeEl = document.getElementById("triangle-size");
   sliderUndoOnce(triangleSizeEl);
   triangleSizeEl.addEventListener("input", event => {
