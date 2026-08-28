@@ -14,6 +14,7 @@ let currentHitEntries = [];
 let currentNodePositions = new Map();
 let currentTipPositions = new Map();
 let currentUsesBatchedDots = false;
+let currentCladeColors = new Map();
 let viewportRefreshFrame = null;
 let queuedRenderFrame = null;
 
@@ -61,6 +62,38 @@ function drawMotifPie(fragments, cx, cy, r, colors) {
       `<path d="M${cx},${cy} L${x0},${y0} A${r},${r} 0 ${large},1 ${x1},${y1} Z" fill="${colors[i]}" class="tip-dot motif-match"/>`
     );
   }
+}
+
+// Resolve each node to the color of the nearest colored ancestor (or its own
+// color, which wins over an outer clade). A node's line is the branch coming
+// from its parent, so coloring by node id also colors the clade's stem.
+function buildCladeColorMap() {
+  const map = new Map();
+  if (!state.treeData || Object.keys(state.cladeColors).length === 0) return map;
+  const stack = [[state.treeData, null]];
+  while (stack.length > 0) {
+    const [node, inherited] = stack.pop();
+    const color = state.cladeColors[node.id] || inherited;
+    if (color) map.set(node.id, color);
+    if (node.ch) {
+      for (let i = node.ch.length - 1; i >= 0; i--) stack.push([node.ch[i], color]);
+    }
+  }
+  return map;
+}
+
+/** Branch stroke: an enclosing clade color overrides the species color. */
+function resolveBranchColor(node, checkedSpecies) {
+  return currentCladeColors.get(node.id) || getNodeColor(node, checkedSpecies);
+}
+
+/** Connector (vertical line / arc) stroke inside a node's own clade. */
+function resolveConnectorColor(node) {
+  return currentCladeColors.get(node.id) || "#999";
+}
+
+function resolveTriangleFill(node) {
+  return currentCladeColors.get(node.id) || "#cde";
 }
 
 function ensureRenderLayers() {
@@ -183,6 +216,7 @@ export function renderTree() {
   );
 
   const fragments = [];
+  currentCladeColors = buildCladeColorMap();
   const layoutMetadata = buildLayoutMetadata(state.treeData);
   currentLabelEntries = [];
   currentHitEntries = [];
@@ -293,7 +327,7 @@ function renderRectangular(fragments, checkedSpecies, layoutMetadata) {
     const px = node.parentX;
     const nx = node.x;
     const ny = node.y;
-    const color = getNodeColor(node, checkedSpecies);
+    const color = resolveBranchColor(node, checkedSpecies);
 
     fragments.push(`<line x1="${px}" y1="${ny}" x2="${nx}" y2="${ny}" stroke="${color}" stroke-width="1"/>`);
 
@@ -304,7 +338,7 @@ function renderRectangular(fragments, checkedSpecies, layoutMetadata) {
     if (node.layoutChildren) {
       const firstY = node.layoutChildren[0].y;
       const lastY = node.layoutChildren[node.layoutChildren.length - 1].y;
-      fragments.push(`<line x1="${nx}" y1="${firstY}" x2="${nx}" y2="${lastY}" stroke="#999" stroke-width="1"/>`);
+      fragments.push(`<line x1="${nx}" y1="${firstY}" x2="${nx}" y2="${lastY}" stroke="${resolveConnectorColor(node)}" stroke-width="1"/>`);
       drawNodeDot(fragments, nx, ny, node);
       node.layoutChildren.forEach(draw);
     } else {
@@ -372,7 +406,7 @@ function renderCircular(fragments, checkedSpecies, layoutMetadata) {
   function draw(node) {
     const [nx, ny] = toXY(node.r, node.angle);
     const [px, py] = toXY(node.parentR, node.angle);
-    const color = getNodeColor(node, checkedSpecies);
+    const color = resolveBranchColor(node, checkedSpecies);
 
     fragments.push(`<line x1="${px}" y1="${py}" x2="${nx}" y2="${ny}" stroke="${color}" stroke-width="1"/>`);
 
@@ -387,7 +421,7 @@ function renderCircular(fragments, checkedSpecies, layoutMetadata) {
       const [ax2, ay2] = toXY(node.r, a2);
       const sweep = a2 - a1;
       const large = sweep > Math.PI ? 1 : 0;
-      fragments.push(`<path d="M${ax1},${ay1} A${node.r},${node.r} 0 ${large},1 ${ax2},${ay2}" fill="none" stroke="#999" stroke-width="1"/>`);
+      fragments.push(`<path d="M${ax1},${ay1} A${node.r},${node.r} 0 ${large},1 ${ax2},${ay2}" fill="none" stroke="${resolveConnectorColor(node)}" stroke-width="1"/>`);
       drawNodeDot(fragments, nx, ny, node);
       node.layoutChildren.forEach(draw);
     } else {
@@ -461,7 +495,7 @@ function renderUnrooted(fragments, checkedSpecies, layoutMetadata) {
   }
 
   function draw(node) {
-    const color = getNodeColor(node, checkedSpecies);
+    const color = resolveBranchColor(node, checkedSpecies);
     fragments.push(`<line x1="${node.parentX}" y1="${node.parentY}" x2="${node.x}" y2="${node.y}" stroke="${color}" stroke-width="1"/>`);
 
     if (node.collapsed) {
@@ -717,7 +751,7 @@ function appendCollapsedRectangular(out, node) {
   const triW = 30 * state.triangleScale / 100;
   const triLabel = state.nodeLabels[node.id] ? `${state.nodeLabels[node.id]} (${node.tipCount})` : `${node.tipCount} tips`;
   out.push(
-    `<polygon points="${node.x},${node.y} ${node.x + triW},${node.y - triH / 2} ${node.x + triW},${node.y + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+    `<polygon points="${node.x},${node.y} ${node.x + triW},${node.y - triH / 2} ${node.x + triW},${node.y + triH / 2}" fill="${resolveTriangleFill(node)}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
     `<text x="${node.x + triW + 4}" y="${node.y + 3}" font-size="9" fill="#666">${triLabel}</text>`
   );
   drawNodeDot(out, node.x, node.y, node);
@@ -731,7 +765,7 @@ function appendCollapsedCircular(out, node, nx, ny, toXY) {
   const [wx2, wy2] = toXY(wedgeR, node.angle + halfArc);
   const large = halfArc * 2 > Math.PI ? 1 : 0;
   out.push(
-    `<path d="M${nx},${ny} L${wx1},${wy1} A${wedgeR},${wedgeR} 0 ${large},1 ${wx2},${wy2} Z" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+    `<path d="M${nx},${ny} L${wx1},${wy1} A${wedgeR},${wedgeR} 0 ${large},1 ${wx2},${wy2} Z" fill="${resolveTriangleFill(node)}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
     `<text x="${(wx1 + wx2) / 2 + 4}" y="${(wy1 + wy2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
   );
   drawNodeDot(out, nx, ny, node);
@@ -746,7 +780,7 @@ function appendCollapsedUnrooted(out, node) {
   const x2 = node.x + fanLen * Math.cos(node.angle + halfW);
   const y2 = node.y + fanLen * Math.sin(node.angle + halfW);
   out.push(
-    `<polygon points="${node.x},${node.y} ${x1},${y1} ${x2},${y2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+    `<polygon points="${node.x},${node.y} ${x1},${y1} ${x2},${y2}" fill="${resolveTriangleFill(node)}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
     `<text x="${(x1 + x2) / 2 + 2}" y="${(y1 + y2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
   );
   drawNodeDot(out, node.x, node.y, node);
@@ -896,15 +930,18 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
   const tipLabels = [];
 
   function collect(node) {
-    const color = getNodeColor(node, checkedSpecies);
-    branchPaths.push({ x1: node.parentX, y1: node.y, x2: node.x, y2: node.y, color });
+    const color = resolveBranchColor(node, checkedSpecies);
+    branchPaths.push({ d: `M${node.parentX},${node.y}L${node.x},${node.y}`, color });
 
     if (node.collapsed) {
       appendCollapsedRectangular(triangles, node);
       return;
     }
     if (node.layoutChildren) {
-      vlinePaths.push({ x: node.x, y1: node.layoutChildren[0].y, y2: node.layoutChildren[node.layoutChildren.length - 1].y });
+      vlinePaths.push({
+        d: `M${node.x},${node.layoutChildren[0].y}L${node.x},${node.layoutChildren[node.layoutChildren.length - 1].y}`,
+        color: resolveConnectorColor(node),
+      });
       const appearance = getNodeDotAppearance(node.id);
       dotData.push({
         cx: node.x,
@@ -926,10 +963,8 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
   }
 
   collect(root);
-  emitFastBranches(fragments, branchPaths);
-  if (vlinePaths.length > 0) {
-    fragments.push(`<path d="${vlinePaths.map(v => `M${v.x},${v.y1}L${v.x},${v.y2}`).join("")}" stroke="#999" stroke-width="1" fill="none"/>`);
-  }
+  emitPathsByColor(fragments, branchPaths);
+  emitPathsByColor(fragments, vlinePaths);
   emitFastTrianglesAndDots(fragments, triangles, dotData);
   tipLabels.forEach(label => queueTipLabel(label.x, label.y, label.node, checkedSpecies));
 }
@@ -944,8 +979,8 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
   function collect(node) {
     const [nx, ny] = toXY(node.r, node.angle);
     const [px, py] = toXY(node.parentR, node.angle);
-    const color = getNodeColor(node, checkedSpecies);
-    branchPaths.push({ x1: px, y1: py, x2: nx, y2: ny, color });
+    const color = resolveBranchColor(node, checkedSpecies);
+    branchPaths.push({ d: `M${px},${py}L${nx},${ny}`, color });
 
     if (node.collapsed) {
       appendCollapsedCircular(triangles, node, nx, ny, toXY);
@@ -957,7 +992,10 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
       const [ax1, ay1] = toXY(node.r, a1);
       const [ax2, ay2] = toXY(node.r, a2);
       const large = a2 - a1 > Math.PI ? 1 : 0;
-      arcPaths.push(`M${ax1},${ay1} A${node.r},${node.r} 0 ${large},1 ${ax2},${ay2}`);
+      arcPaths.push({
+        d: `M${ax1},${ay1} A${node.r},${node.r} 0 ${large},1 ${ax2},${ay2}`,
+        color: resolveConnectorColor(node),
+      });
 
       const appearance = getNodeDotAppearance(node.id);
       dotData.push({
@@ -989,10 +1027,8 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
   }
 
   collect(root);
-  emitFastBranches(fragments, branchPaths);
-  if (arcPaths.length > 0) {
-    fragments.push(`<path d="${arcPaths.join("")}" stroke="#999" stroke-width="1" fill="none"/>`);
-  }
+  emitPathsByColor(fragments, branchPaths);
+  emitPathsByColor(fragments, arcPaths);
   emitFastTrianglesAndDots(fragments, triangles, dotData);
   tipLabels.forEach(label => queueTipLabelRadial(label.x, label.y, label.angle, label.anchor, label.node, checkedSpecies));
 }
@@ -1004,8 +1040,8 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
   const tipLabels = [];
 
   function collect(node) {
-    const color = getNodeColor(node, checkedSpecies);
-    branchPaths.push({ x1: node.parentX, y1: node.parentY, x2: node.x, y2: node.y, color });
+    const color = resolveBranchColor(node, checkedSpecies);
+    branchPaths.push({ d: `M${node.parentX},${node.parentY}L${node.x},${node.y}`, color });
 
     if (node.collapsed) {
       appendCollapsedUnrooted(triangles, node);
@@ -1042,19 +1078,22 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
   }
 
   collect(root);
-  emitFastBranches(fragments, branchPaths);
+  emitPathsByColor(fragments, branchPaths);
   emitFastTrianglesAndDots(fragments, triangles, dotData);
   tipLabels.forEach(label => queueTipLabelRadial(label.x, label.y, label.angle, label.anchor, label.node, checkedSpecies));
 }
 
-function emitFastBranches(fragments, branchPaths) {
-  const byColor = {};
-  for (const branch of branchPaths) {
-    if (!byColor[branch.color]) byColor[branch.color] = [];
-    byColor[branch.color].push(`M${branch.x1},${branch.y1}L${branch.x2},${branch.y2}`);
+// Batch `{ d, color }` segments into one <path> per distinct color: branches,
+// vertical connectors, and arcs all share this so clade colors stay grouped.
+function emitPathsByColor(fragments, entries) {
+  const byColor = new Map();
+  for (const entry of entries) {
+    const segments = byColor.get(entry.color);
+    if (segments) segments.push(entry.d);
+    else byColor.set(entry.color, [entry.d]);
   }
-  for (const [color, segs] of Object.entries(byColor)) {
-    fragments.push(`<path d="${segs.join("")}" stroke="${color}" stroke-width="1" fill="none"/>`);
+  for (const [color, segments] of byColor) {
+    fragments.push(`<path d="${segments.join("")}" stroke="${color}" stroke-width="1" fill="none"/>`);
   }
 }
 

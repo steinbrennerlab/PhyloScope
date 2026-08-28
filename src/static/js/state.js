@@ -59,6 +59,7 @@ function createInitialState() {
   nodeLabels: {},
   nodeLabelIcons: {},
   nodeLabelColors: {},
+  cladeColors: {},   // nodeId → branch color applied to that clade
   labelFontSize: 10,
   tipMarkers: {},      // tipName → { text, color, icon }
 
@@ -147,7 +148,7 @@ export function getInlineStyles() {
     ".motif-match": "stroke:#e22;stroke-width:2",
     ".shared-node": "fill:#ff6600;stroke:#c40;stroke-width:1.5",
     ".experimental-node": "fill:#14b8a6;stroke:#0f766e;stroke-width:1.5",
-    ".collapsed-triangle": "fill:#cde;stroke:#89a",
+    ".collapsed-triangle": "stroke:#89a",
     ".bootstrap-label": "font-size:8px;fill:#666",
     ".node-label": `font-size:${state.labelFontSize}px;font-weight:bold;fill:#333;font-family:system-ui,sans-serif`,
   };

@@ -231,6 +231,31 @@
   </div>
 
   <div class="section">
+    <h3>Clade Colors</h3>
+    <div id="clade-color-input-container" style="display:none;">
+      <div class="row" style="flex-wrap:wrap;">
+        <select id="clade-color-select">
+          <option value="#e22">Red</option>
+          <option value="#2563eb">Blue</option>
+          <option value="#16a34a">Green</option>
+          <option value="#ea580c">Orange</option>
+          <option value="#9333ea">Purple</option>
+          <option value="#0891b2">Teal</option>
+          <option value="#be185d">Pink</option>
+          <option value="#854d0e">Brown</option>
+          <option value="#333">Black</option>
+          <option value="custom">Custom&hellip;</option>
+        </select>
+        <input type="color" id="clade-color-custom" value="#e22" style="display:none;width:28px;padding:0;border:1px solid #bbb;border-radius:3px;">
+        <button id="set-clade-color-btn" class="btn">Set</button>
+        <button id="remove-clade-color-btn" class="btn-sm" style="display:none;">Remove</button>
+      </div>
+    </div>
+    <div id="clade-color-list"></div>
+    <p class="hint" id="clade-color-hint">Select a node to color its branches</p>
+  </div>
+
+  <div class="section">
     <h3>Motif Search</h3>
     <div class="row">
       <select id="motif-type">

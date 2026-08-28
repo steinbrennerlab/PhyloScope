@@ -372,7 +372,9 @@ function labelExperimentalClades() {
   invalidateRenderCache();
   renderTree();
   buildLabelList();
+  buildCladeColorList();
   updateLabelInput();
+  updateCladeColorInput();
 }
 
 function compareExperimentalMatchEntries(a, b) {
@@ -955,7 +957,9 @@ function buildLabelList() {
         invalidateRenderCache();
         renderTree();
         buildLabelList();
+        buildCladeColorList();
         updateLabelInput();
+        updateCladeColorInput();
       };
       input.addEventListener("blur", commit);
       input.addEventListener("keydown", e => {
@@ -975,7 +979,9 @@ function buildLabelList() {
       invalidateRenderCache();
       renderTree();
       buildLabelList();
+      buildCladeColorList();
       updateLabelInput();
+      updateCladeColorInput();
     });
     row.append(swatch, iconSelect, text, removeBtn);
     container.appendChild(row);
@@ -1514,6 +1520,7 @@ function captureState() {
     nodeLabels: { ...state.nodeLabels },
     nodeLabelIcons: { ...state.nodeLabelIcons },
     nodeLabelColors: { ...state.nodeLabelColors },
+    cladeColors: { ...state.cladeColors },
     tipMarkers: JSON.parse(JSON.stringify(state.tipMarkers)),
     labelFontSize: state.labelFontSize,
     layoutMode: state.layoutMode,
@@ -1545,6 +1552,7 @@ function restoreState(snapshot) {
   state.nodeLabels = snapshot.nodeLabels;
   state.nodeLabelIcons = snapshot.nodeLabelIcons || {};
   state.nodeLabelColors = snapshot.nodeLabelColors || {};
+  state.cladeColors = snapshot.cladeColors || {};
   state.tipMarkers = snapshot.tipMarkers || {};
   // Restore display settings (use fallback defaults for older snapshots)
   state.labelFontSize = snapshot.labelFontSize ?? state.labelFontSize;
@@ -1580,8 +1588,10 @@ function restoreState(snapshot) {
   invalidateRenderCache();
   updateFilterBadge();
   buildLabelList();
+  buildCladeColorList();
   buildTipLabelList();
   updateLabelInput();
+  updateCladeColorInput();
   updateTipLabelInput();
   updateUndoRedoButtons();
   updateTriangleControls();
@@ -1813,6 +1823,7 @@ function openExportPanel(nodeId) {
   document.getElementById("newick-info").textContent = `Node #${nodeId} \u2014 ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
   document.getElementById("newick-result").textContent = "";
   updateLabelInput();
+  updateCladeColorInput();
   updateExportPreview();
   // Scroll to Clade Labels, accounting for sticky Loaded Data panel
   const labelSection = document.getElementById("label-input-container").closest(".section");
@@ -2132,6 +2143,107 @@ function setNodeLabel() {
   invalidateRenderCache();
   renderTree();
   buildLabelList();
+  buildCladeColorList();
+}
+
+// ---------------------------------------------------------------------------
+// Clade branch colors
+// ---------------------------------------------------------------------------
+
+function getCladeColorInput() {
+  const sel = document.getElementById("clade-color-select");
+  return sel.value === "custom" ? document.getElementById("clade-color-custom").value : sel.value;
+}
+
+function updateCladeColorInput() {
+  const container = document.getElementById("clade-color-input-container");
+  if (state.exportNodeId == null) {
+    container.style.display = "none";
+    return;
+  }
+  container.style.display = "";
+  const current = state.cladeColors[state.exportNodeId];
+  document.getElementById("remove-clade-color-btn").style.display = current ? "" : "none";
+  const colorSel = document.getElementById("clade-color-select");
+  const colorCustom = document.getElementById("clade-color-custom");
+  if (!current) return;
+  const presetOpt = [...colorSel.options].find(o => o.value === current);
+  if (presetOpt) {
+    colorSel.value = current;
+    colorCustom.style.display = "none";
+  } else {
+    colorSel.value = "custom";
+    colorCustom.value = current;
+    colorCustom.style.display = "";
+  }
+}
+
+function setCladeColor() {
+  if (state.exportNodeId == null) return;
+  pushUndo();
+  state.cladeColors[state.exportNodeId] = getCladeColorInput();
+  invalidateRenderCache();
+  renderTree();
+  buildCladeColorList();
+  updateCladeColorInput();
+}
+
+function removeCladeColor(nodeId) {
+  pushUndo();
+  delete state.cladeColors[nodeId];
+  invalidateRenderCache();
+  renderTree();
+  buildCladeColorList();
+  updateCladeColorInput();
+}
+
+function describeCladeNode(nodeId) {
+  const label = state.nodeLabels[nodeId];
+  const node = state.nodeById[nodeId];
+  const tips = node ? countAllTips(node) : 0;
+  return `${label || `Node ${nodeId}`} (${tips} tip${tips === 1 ? "" : "s"})`;
+}
+
+function buildCladeColorList() {
+  const container = document.getElementById("clade-color-list");
+  container.innerHTML = "";
+  // Entries can outlive their node across subtree/reroot operations; show only live ones.
+  const entries = Object.keys(state.cladeColors)
+    .filter(nodeId => state.nodeById[nodeId])
+    .sort((a, b) => describeCladeNode(a).localeCompare(describeCladeNode(b), undefined, { numeric: true }));
+  document.getElementById("clade-color-hint").style.display = entries.length > 0 ? "none" : "";
+
+  for (const nodeId of entries) {
+    const row = document.createElement("div");
+    row.className = "label-entry";
+
+    const swatch = document.createElement("span");
+    swatch.className = "tip-label-swatch";
+    swatch.style.background = state.cladeColors[nodeId];
+    swatch.title = "Click to change color";
+    swatch.addEventListener("click", () => openColorSwatchPicker(swatch, {
+      initial: state.cladeColors[nodeId],
+      onPick: value => { state.cladeColors[nodeId] = value; },
+      onDone: () => updateCladeColorInput(),
+    }));
+
+    const text = document.createElement("span");
+    text.className = "label-text label-text-clickable";
+    text.textContent = describeCladeNode(nodeId);
+    text.title = "Click to select this node";
+    text.addEventListener("click", () => {
+      selectNode(+nodeId, { center: true, expandCollapsedPath: true });
+    });
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "motif-remove";
+    removeBtn.textContent = "×";
+    removeBtn.title = "Remove clade color";
+    removeBtn.addEventListener("click", () => removeCladeColor(nodeId));
+
+    row.append(swatch, text, removeBtn);
+    container.appendChild(row);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2194,6 +2306,7 @@ function saveSession() {
     nodeLabels: state.nodeLabels,
     nodeLabelIcons: state.nodeLabelIcons,
     nodeLabelColors: state.nodeLabelColors,
+    cladeColors: state.cladeColors,
     tipMarkers: state.tipMarkers,
     speciesColors: state.speciesColors,
     labelFontSize: state.labelFontSize,
@@ -2332,8 +2445,10 @@ async function loadSessionV2(session, fromSetup) {
 
   updateFilterBadge();
   buildLabelList();
+  buildCladeColorList();
   buildTipLabelList();
   updateLabelInput();
+  updateCladeColorInput();
   updateTipLabelInput();
   invalidateRenderCache();
   renderTree();
@@ -2365,7 +2480,9 @@ function loadSessionV1(session, fromSetup) {
 
   updateFilterBadge();
   buildLabelList();
+  buildCladeColorList();
   updateLabelInput();
+  updateCladeColorInput();
   refreshExperimentalHighlightsAndInfo();
   invalidateRenderCache();
   renderTree();
@@ -2377,6 +2494,7 @@ function applySessionSettings(session) {
   state.nodeLabels = session.nodeLabels || {};
   state.nodeLabelIcons = session.nodeLabelIcons || {};
   state.nodeLabelColors = session.nodeLabelColors || {};
+  state.cladeColors = session.cladeColors || {};
   state.tipMarkers = session.tipMarkers || {};
   state.speciesColors = session.speciesColors || state.speciesColors;
   state.labelFontSize = session.labelFontSize ?? 10;
@@ -2921,6 +3039,7 @@ function initAfterLoad() {
   loadTipDatalist();
   applyFastaState();
   buildLabelList();
+  buildCladeColorList();
   buildTipLabelList();
   updateFilterBadge();
 }
@@ -3194,6 +3313,14 @@ function setupControls() {
   document.getElementById("node-label-color-select").addEventListener("change", event => {
     const custom = document.getElementById("node-label-color-custom");
     custom.style.display = event.target.value === "custom" ? "" : "none";
+  });
+  document.getElementById("clade-color-select").addEventListener("change", event => {
+    const custom = document.getElementById("clade-color-custom");
+    custom.style.display = event.target.value === "custom" ? "" : "none";
+  });
+  document.getElementById("set-clade-color-btn").addEventListener("click", setCladeColor);
+  document.getElementById("remove-clade-color-btn").addEventListener("click", () => {
+    if (state.exportNodeId != null) removeCladeColor(state.exportNodeId);
   });
   const labelFontSizeEl = document.getElementById("label-font-size");
   sliderUndoOnce(labelFontSizeEl);
