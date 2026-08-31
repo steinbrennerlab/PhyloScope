@@ -18,6 +18,13 @@ function createInitialState() {
   subtreeLeafRange: {},
   treeRevision: 0,
 
+  // ape/ggtree node numbers for the tree as loaded (derived, not undo state)
+  apeNumberByNodeId: {},
+  apeNodeIdByNumber: {},
+  apeTipCount: 0,
+  apeMaxNumber: 0,
+  treeRerooted: false,
+
   // Protein sequences (client-side)
   proteinSeqs: null,
   proteinSeqsUngapped: null,

@@ -17,6 +17,43 @@ function compileSpeciesInferencePattern(pattern) {
 }
 
 /**
+ * Assign ape/ggtree node numbers to every node of `root`.
+ *
+ * `ape::read.tree` numbers tips 1..Ntip in the order they appear in the Newick
+ * string and internal nodes Ntip+1.. in preorder, root first. A single preorder
+ * DFS in child order therefore yields both, drawn from two counters. (Our own
+ * node ids come from parseNewick in postorder, so the two never coincide.)
+ * Verified against ape 5.x: `(((A,B),C),(D,(E,F)));` gives tips A..F = 1..6,
+ * root = 7, (A,B,C) = 8, (A,B) = 9, (D,E,F) = 10, (E,F) = 11.
+ *
+ * @param {object} root - Tree root node.
+ * @returns {{ apeByNodeId: object, apeNodeIdByNumber: object, tipCount: number, maxNumber: number }}
+ */
+export function buildApeNodeNumbers(root) {
+  const apeByNodeId = {};
+  const apeNodeIdByNumber = {};
+  if (!root) return { apeByNodeId, apeNodeIdByNumber, tipCount: 0, maxNumber: 0 };
+
+  const tipCount = collectAllTipNames(root).length;
+  let nextTip = 1;
+  let nextInternal = tipCount + 1;
+  const stack = [root];
+
+  while (stack.length > 0) {
+    const node = stack.pop();
+    const isTip = !node.ch || node.ch.length === 0;
+    const number = isTip ? nextTip++ : nextInternal++;
+    apeByNodeId[node.id] = number;
+    apeNodeIdByNumber[number] = node.id;
+    if (node.ch) {
+      for (let i = node.ch.length - 1; i >= 0; i--) stack.push(node.ch[i]);
+    }
+  }
+
+  return { apeByNodeId, apeNodeIdByNumber, tipCount, maxNumber: nextInternal - 1 };
+}
+
+/**
  * Convert a tree node to Newick string (no trailing semicolon).
  */
 export function nodeToNewick(node) {
@@ -254,15 +291,11 @@ export function rerootTree(treeData, targetId) {
     }
   }
 
-  let counter = 0;
-  function reassignIds(node) {
-    node.id = counter++;
-    if (node.ch) {
-      for (const c of node.ch) reassignIds(c);
-    }
-  }
-  reassignIds(target);
-
+  // Node ids are deliberately left alone. Re-rooting only re-hangs existing nodes,
+  // so keeping their ids keeps every id-keyed annotation (clade labels, clade colors,
+  // ape/ggtree numbers) pointing at the node the user attached it to. Ids stay unique
+  // but no longer dense, which the rest of the app already handles - subtree focus
+  // produces sparse ids the same way.
   return target;
 }
 

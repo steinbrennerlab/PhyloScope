@@ -21,6 +21,7 @@ import {
 import { parseDatasetText, prositeToRegex } from "./parsers.js";
 import {
   annotateSpecies,
+  buildApeNodeNumbers,
   buildExportFasta,
   computePairwiseIdentity,
   DEFAULT_SPECIES_INFER_PATTERN,
@@ -1638,6 +1639,64 @@ function openSubtree(nodeId) {
 }
 
 // ---------------------------------------------------------------------------
+// ape/ggtree node numbers
+// ---------------------------------------------------------------------------
+
+/** " (ape/ggtree: N)" for a node id, or "" when no numbering is available. */
+function apeNumberSuffix(nodeId) {
+  const number = state.apeNumberByNodeId[nodeId];
+  return number == null ? "" : ` (ape/ggtree: ${number})`;
+}
+
+function setApeNodeResult(message) {
+  document.getElementById("ape-node-result").textContent = message;
+}
+
+function goToApeNode() {
+  const raw = document.getElementById("ape-node-input").value.trim();
+  if (!state.loaded || state.apeMaxNumber === 0) {
+    setApeNodeResult("Load a tree first");
+    return;
+  }
+  if (!/^\d+$/.test(raw)) {
+    setApeNodeResult("Enter a whole node number");
+    return;
+  }
+
+  const number = Number(raw);
+  const nodeId = state.apeNodeIdByNumber[number];
+  if (nodeId == null) {
+    setApeNodeResult(`No node numbered ${number} \u2014 this tree has 1\u2013${state.apeMaxNumber}`);
+    return;
+  }
+
+  const node = state.nodeById[nodeId];
+  if (!node) {
+    setApeNodeResult(`Node ${number} is not in the current subtree view \u2014 go back to the full tree first`);
+    return;
+  }
+
+  // Numbers describe the tree as loaded; say so once the view no longer is that tree.
+  const note = state.fullTreeData !== null || state.treeRerooted
+    ? " \u00b7 numbers refer to the tree as loaded"
+    : "";
+
+  if (!node.ch || node.ch.length === 0) {
+    expandCollapsedPathToNode(nodeId);
+    state.selectedTip = node.name;
+    updateTipLabelInput();
+    refreshTipLabels();
+    centerTipInView(node.name);
+    setApeNodeResult(`Node ${number} \u2014 tip ${node.name}${note}`);
+    return;
+  }
+
+  selectNode(nodeId, { center: true, expandCollapsedPath: true });
+  const tips = countAllTips(node);
+  setApeNodeResult(`Node ${number} \u2014 node #${nodeId}, ${tips} tip${tips === 1 ? "" : "s"}${note}`);
+}
+
+// ---------------------------------------------------------------------------
 // Reroot (local, replacing fetch)
 // ---------------------------------------------------------------------------
 
@@ -1657,6 +1716,7 @@ function rerootAt(nodeId) {
   }
 
   state.treeData = newRoot;
+  state.treeRerooted = true;
   reindexTree(state.treeData);
   state.collapsedNodes.clear();
   state.selectedTip = null;
@@ -1749,6 +1809,10 @@ async function copyNodeFasta(nodeId) {
 
 function buildTipTooltip(tipName, species) {
   const lines = [tipName, `Species: ${species || "unknown"}`];
+  const tipNode = state.tipByName[tipName];
+  if (tipNode && state.apeNumberByNodeId[tipNode.id] != null) {
+    lines.push(`ape/ggtree: ${state.apeNumberByNodeId[tipNode.id]}`);
+  }
   if (state.hasFasta) {
     const alnSet = new Set(state.allTipNames);
     if (!alnSet.has(tipName)) {
@@ -1804,10 +1868,10 @@ function openExportPanel(nodeId) {
   const infoEl = document.getElementById("export-info");
   if (missingTips.length > 0) {
     infoEl.innerHTML =
-      `Node #${nodeId} \u2014 ${tips.length} tip${tips.length !== 1 ? "s" : ""}` +
+      `Node #${nodeId}${apeNumberSuffix(nodeId)} \u2014 ${tips.length} tip${tips.length !== 1 ? "s" : ""}` +
       `<br><span style="color:#c0392b">${missingTips.length} tip${missingTips.length !== 1 ? "s" : ""} not in alignment: ${missingTips.slice(0, 5).join(", ")}${missingTips.length > 5 ? ", ..." : ""}</span>`;
   } else {
-    infoEl.textContent = `Node #${nodeId} \u2014 ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
+    infoEl.textContent = `Node #${nodeId}${apeNumberSuffix(nodeId)} \u2014 ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
   }
   document.getElementById("export-tips-summary").textContent = `Tip names (${tips.length})`;
   document.getElementById("export-tips-list").textContent = tips.join("\n");
@@ -1820,7 +1884,7 @@ function openExportPanel(nodeId) {
   document.getElementById("export-ref-end").value = "";
   document.getElementById("export-result").textContent = "";
   document.getElementById("newick-form").style.display = "";
-  document.getElementById("newick-info").textContent = `Node #${nodeId} \u2014 ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
+  document.getElementById("newick-info").textContent = `Node #${nodeId}${apeNumberSuffix(nodeId)} \u2014 ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
   document.getElementById("newick-result").textContent = "";
   updateLabelInput();
   updateCladeColorInput();
@@ -2307,6 +2371,9 @@ function saveSession() {
     nodeLabelIcons: state.nodeLabelIcons,
     nodeLabelColors: state.nodeLabelColors,
     cladeColors: state.cladeColors,
+    apeNumberByNodeId: state.apeNumberByNodeId,
+    apeTipCount: state.apeTipCount,
+    treeRerooted: state.treeRerooted,
     tipMarkers: state.tipMarkers,
     speciesColors: state.speciesColors,
     labelFontSize: state.labelFontSize,
@@ -2495,6 +2562,12 @@ function applySessionSettings(session) {
   state.nodeLabelIcons = session.nodeLabelIcons || {};
   state.nodeLabelColors = session.nodeLabelColors || {};
   state.cladeColors = session.cladeColors || {};
+  // Prefer the stored numbering: a session saved after a re-root no longer holds the
+  // tree as loaded, so recomputing here would drift from what R reports for the file.
+  state.treeRerooted = session.treeRerooted ?? false;
+  applyApeNodeNumbers(session.apeNumberByNodeId
+    ? apeNumbersFromStoredMap(session.apeNumberByNodeId, session.apeTipCount)
+    : buildApeNodeNumbers(state.fullTreeData || state.treeData));
   state.tipMarkers = session.tipMarkers || {};
   state.speciesColors = session.speciesColors || state.speciesColors;
   state.labelFontSize = session.labelFontSize ?? 10;
@@ -2994,6 +3067,26 @@ function applyLoadResult(result) {
     }
   }
   state.parsedDatasets = {};
+  applyApeNodeNumbers(buildApeNodeNumbers(result.treeData));
+}
+
+/** Store an ape/ggtree numbering (from buildApeNodeNumbers or a saved session). */
+function applyApeNodeNumbers({ apeByNodeId, apeNodeIdByNumber, tipCount, maxNumber }) {
+  state.apeNumberByNodeId = apeByNodeId || {};
+  state.apeNodeIdByNumber = apeNodeIdByNumber || {};
+  state.apeTipCount = tipCount || 0;
+  state.apeMaxNumber = maxNumber || 0;
+}
+
+/** Rebuild the reverse index from a session's stored nodeId -> number map. */
+function apeNumbersFromStoredMap(apeByNodeId, tipCount) {
+  const apeNodeIdByNumber = {};
+  let maxNumber = 0;
+  for (const [nodeId, number] of Object.entries(apeByNodeId)) {
+    apeNodeIdByNumber[number] = Number(nodeId);
+    if (number > maxNumber) maxNumber = number;
+  }
+  return { apeByNodeId, apeNodeIdByNumber, tipCount: tipCount || 0, maxNumber };
 }
 
 function initAfterLoad() {
@@ -3314,6 +3407,10 @@ function setupControls() {
     const custom = document.getElementById("node-label-color-custom");
     custom.style.display = event.target.value === "custom" ? "" : "none";
   });
+  document.getElementById("ape-node-go").addEventListener("click", goToApeNode);
+  document.getElementById("ape-node-input").addEventListener("keydown", event => {
+    if (event.key === "Enter") goToApeNode();
+  });
   document.getElementById("clade-color-select").addEventListener("change", event => {
     const custom = document.getElementById("clade-color-custom");
     custom.style.display = event.target.value === "custom" ? "" : "none";
@@ -3437,7 +3534,7 @@ function onTreeHover(event) {
   if (el.dataset?.nodeid == null) return;
   const node = state.nodeById[Number(el.dataset.nodeid)];
   const tipCount = node ? countAllTips(node) : 0;
-  let text = `Node #${el.dataset.nodeid}\nTips: ${tipCount}`;
+  let text = `Node #${el.dataset.nodeid}${apeNumberSuffix(Number(el.dataset.nodeid))}\nTips: ${tipCount}`;
   if (el.dataset.support != null) text += `\nSupport: ${el.dataset.support}`;
   if (node && state.experimentalNodes.has(node.id)) text += "\nExperimental match";
   text += state.hasFasta ? "\nClick: select & copy FASTA" : "\nClick: select node";
