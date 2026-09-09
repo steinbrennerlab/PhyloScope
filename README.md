@@ -46,6 +46,10 @@ npm run build  # bundles to docs/
 
 Requires Node.js 18+.
 
+Run the regression tests from `src/` with `npm test` (use `npm.cmd test` in Windows PowerShell). Tests cover Newick parsing/export, re-rooting invariants, imported-label escaping, and session isolation. The session tests use a DOM stand-in; they do not replace browser interaction testing.
+
+Newick input must contain one complete tree ending in a semicolon. Quoted labels (including doubled single quotes), whitespace, and square-bracket comments are supported. Underscores are preserved literally to keep tree labels aligned with FASTA identifiers. Malformed trees and invalid branch lengths produce an error instead of being partially loaded.
+
 ## Getting Started
 
 On launch, a setup dialog lets you load your data:
@@ -90,7 +94,7 @@ An example dataset is provided in `example_data/`.
 - **Uniform triangles**: toggle to make all collapsed triangles the same size regardless of tip count
 - **Triangle size**: adjustable via slider
 - **Subtree focus**: Ctrl+click an internal node to view its subtree in isolation; click "Back to full tree" to return
-- **Re-root**: Ctrl+Shift+click any node or tip to re-root the tree at that point
+- **Re-root**: Ctrl+Shift+click an internal node to root there, or a tip to insert a root halfway along its incoming branch; tips and pairwise distances are preserved
 - **Pan and zoom**: mouse drag to pan, scroll wheel to zoom
 
 ### Fast Mode (Large Trees)
@@ -227,6 +231,7 @@ An example dataset is provided in `example_data/`.
 - **Save session**: downloads a self-contained JSON file with all source data (tree, alignment, species files, datasets, and selected experimental JSON files) and full UI state — collapsed nodes, clade labels, species selections, motif searches, tip filters, layout settings, zoom/pan, rerooted tree state
 - **Load session**: pick a session file to restore all state; also available from the setup dialog
 - Sessions are self-contained — they include the original data, so they can be loaded without access to the original files
+- Loading a v2 session validates its saved data and settings before replacing the current workspace, and clears the previous workspace's undo/redo history and transient search/selection state.
 - Old v1 sessions (from the server-based version) are supported as best-effort import: UI settings are applied after you load the source files manually
 
 ## Legacy Server Mode

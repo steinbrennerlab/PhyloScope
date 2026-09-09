@@ -11,10 +11,8 @@ const path = require("path");
 const DIST = path.join(__dirname, "..", "docs");
 const STATIC = path.join(__dirname, "static");
 
-// Clean and create dist/
-if (fs.existsSync(DIST)) {
-  fs.rmSync(DIST, { recursive: true });
-}
+// Overwrite generated assets in place. Removing the directory can fail on
+// Windows when an editor or file browser holds it open.
 fs.mkdirSync(DIST, { recursive: true });
 
 async function build() {

@@ -1,3 +1,4 @@
+import { escapeHtml } from "./html-utils.js";
 import { dom, getInlineStyles, state } from "./state.js";
 import {
   collectAllTipNames,
@@ -46,7 +47,7 @@ export function requestTreeRender() {
 
 function drawMotifPie(fragments, cx, cy, r, colors) {
   if (colors.length === 1) {
-    fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${colors[0]}" class="tip-dot motif-match"/>`);
+    fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${escapeHtml(colors[0])}" class="tip-dot motif-match"/>`);
     return;
   }
   const n = colors.length;
@@ -59,7 +60,7 @@ function drawMotifPie(fragments, cx, cy, r, colors) {
     const y1 = cy + r * Math.sin(a1);
     const large = a1 - a0 > Math.PI ? 1 : 0;
     fragments.push(
-      `<path d="M${cx},${cy} L${x0},${y0} A${r},${r} 0 ${large},1 ${x1},${y1} Z" fill="${colors[i]}" class="tip-dot motif-match"/>`
+      `<path d="M${cx},${cy} L${x0},${y0} A${r},${r} 0 ${large},1 ${x1},${y1} Z" fill="${escapeHtml(colors[i])}" class="tip-dot motif-match"/>`
     );
   }
 }
@@ -329,7 +330,7 @@ function renderRectangular(fragments, checkedSpecies, layoutMetadata) {
     const ny = node.y;
     const color = resolveBranchColor(node, checkedSpecies);
 
-    fragments.push(`<line x1="${px}" y1="${ny}" x2="${nx}" y2="${ny}" stroke="${color}" stroke-width="1"/>`);
+    fragments.push(`<line x1="${px}" y1="${ny}" x2="${nx}" y2="${ny}" stroke="${escapeHtml(color)}" stroke-width="1"/>`);
 
     if (node.collapsed) {
       appendCollapsedRectangular(fragments, node);
@@ -338,7 +339,7 @@ function renderRectangular(fragments, checkedSpecies, layoutMetadata) {
     if (node.layoutChildren) {
       const firstY = node.layoutChildren[0].y;
       const lastY = node.layoutChildren[node.layoutChildren.length - 1].y;
-      fragments.push(`<line x1="${nx}" y1="${firstY}" x2="${nx}" y2="${lastY}" stroke="${resolveConnectorColor(node)}" stroke-width="1"/>`);
+      fragments.push(`<line x1="${nx}" y1="${firstY}" x2="${nx}" y2="${lastY}" stroke="${escapeHtml(resolveConnectorColor(node))}" stroke-width="1"/>`);
       drawNodeDot(fragments, nx, ny, node);
       node.layoutChildren.forEach(draw);
     } else {
@@ -408,7 +409,7 @@ function renderCircular(fragments, checkedSpecies, layoutMetadata) {
     const [px, py] = toXY(node.parentR, node.angle);
     const color = resolveBranchColor(node, checkedSpecies);
 
-    fragments.push(`<line x1="${px}" y1="${py}" x2="${nx}" y2="${ny}" stroke="${color}" stroke-width="1"/>`);
+    fragments.push(`<line x1="${px}" y1="${py}" x2="${nx}" y2="${ny}" stroke="${escapeHtml(color)}" stroke-width="1"/>`);
 
     if (node.collapsed) {
       appendCollapsedCircular(fragments, node, nx, ny, toXY);
@@ -421,7 +422,7 @@ function renderCircular(fragments, checkedSpecies, layoutMetadata) {
       const [ax2, ay2] = toXY(node.r, a2);
       const sweep = a2 - a1;
       const large = sweep > Math.PI ? 1 : 0;
-      fragments.push(`<path d="M${ax1},${ay1} A${node.r},${node.r} 0 ${large},1 ${ax2},${ay2}" fill="none" stroke="${resolveConnectorColor(node)}" stroke-width="1"/>`);
+      fragments.push(`<path d="M${ax1},${ay1} A${node.r},${node.r} 0 ${large},1 ${ax2},${ay2}" fill="none" stroke="${escapeHtml(resolveConnectorColor(node))}" stroke-width="1"/>`);
       drawNodeDot(fragments, nx, ny, node);
       node.layoutChildren.forEach(draw);
     } else {
@@ -496,7 +497,7 @@ function renderUnrooted(fragments, checkedSpecies, layoutMetadata) {
 
   function draw(node) {
     const color = resolveBranchColor(node, checkedSpecies);
-    fragments.push(`<line x1="${node.parentX}" y1="${node.parentY}" x2="${node.x}" y2="${node.y}" stroke="${color}" stroke-width="1"/>`);
+    fragments.push(`<line x1="${node.parentX}" y1="${node.parentY}" x2="${node.x}" y2="${node.y}" stroke="${escapeHtml(color)}" stroke-width="1"/>`);
 
     if (node.collapsed) {
       appendCollapsedUnrooted(fragments, node);
@@ -558,7 +559,7 @@ function appendIconShape(fragments, cx, cy, r, { icon, fill, shapeClass, baseCla
     fragments.push(`<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" font-size="${fontSize}" class="${baseClass}" ${baseData} style="cursor:pointer">${EMOJI_MAP[icon]}</text>`);
     return;
   }
-  const attrs = `fill="${fill}" class="${shapeClass}" ${shapeData}`;
+  const attrs = `fill="${escapeHtml(fill)}" class="${shapeClass}" ${shapeData}`;
   switch (icon) {
     case "star":
       fragments.push(`<polygon points="${starPoints(cx, cy, r)}" ${attrs}/>`);
@@ -589,7 +590,7 @@ function drawNodeIcon(fragments, cx, cy, r, fill, cls, nodeId, sup) {
     fill,
     shapeClass: cls,
     baseClass: "node-dot",
-    shapeData: `${nodeData}${sup != null ? ` data-support="${sup}"` : ""}`,
+    shapeData: `${nodeData}${sup != null ? ` data-support="${escapeHtml(sup)}"` : ""}`,
     baseData: nodeData,
   });
 }
@@ -608,7 +609,7 @@ function drawCollapsedTipMarkers(fragments, cx, cy, node, offsetX, offsetY) {
     drawTipIcon(fragments, curX, my, d * 1.2, color, tipName, "", marker.icon || "dot");
     const label = marker.text ? `${tipName} [${marker.text}]` : tipName;
     const textX = curX + d * 2;
-    fragments.push(`<text x="${textX}" y="${my + fontSize * 0.35}" font-size="${fontSize}" fill="${color}" class="tip-label" data-tip="${tipName}" data-species="">${label}</text>`);
+    fragments.push(`<text x="${textX}" y="${my + fontSize * 0.35}" font-size="${fontSize}" fill="${escapeHtml(color)}" class="tip-label" data-tip="${escapeHtml(tipName)}" data-species="">${escapeHtml(label)}</text>`);
     curX = textX + label.length * charW + d * 2;
   }
 }
@@ -631,22 +632,22 @@ function drawNodeDot(fragments, cx, cy, node) {
     drawNodeIcon(fragments, cx, cy, appearance.r, appearance.fill, appearance.className, node.id, node.sup);
   } else {
     fragments.push(
-      `<circle cx="${cx}" cy="${cy}" r="${appearance.r}" fill="${appearance.fill}" class="${appearance.className}" data-nodeid="${node.id}" ${node.sup != null ? `data-support="${node.sup}"` : ""}/>`
+      `<circle cx="${cx}" cy="${cy}" r="${appearance.r}" fill="${escapeHtml(appearance.fill)}" class="${appearance.className}" data-nodeid="${node.id}" ${node.sup != null ? `data-support="${escapeHtml(node.sup)}"` : ""}/>`
     );
   }
   const d = appearance.d;
   if (state.showBootstraps && node.sup != null) {
-    fragments.push(`<text x="${cx + d * 2}" y="${cy - d * 1.7}" class="bootstrap-label">${node.sup}</text>`);
+    fragments.push(`<text x="${cx + d * 2}" y="${cy - d * 1.7}" class="bootstrap-label">${escapeHtml(node.sup)}</text>`);
   }
   if (state.nodeLabels[node.id]) {
     const textColor = appearance.labelColor || "";
-    const fillAttr = textColor ? ` fill="${textColor}"` : "";
-    fragments.push(`<text x="${cx + d * 2.5}" y="${cy + d * 1.3}" class="node-label" font-size="${state.labelFontSize}"${fillAttr}>${state.nodeLabels[node.id]}</text>`);
+    const fillAttr = textColor ? ` fill="${escapeHtml(textColor)}"` : "";
+    fragments.push(`<text x="${cx + d * 2.5}" y="${cy + d * 1.3}" class="node-label" font-size="${state.labelFontSize}"${fillAttr}>${escapeHtml(state.nodeLabels[node.id])}</text>`);
   }
 }
 
 function drawTipIcon(fragments, cx, cy, r, fill, tipName, species, icon) {
-  const tipData = `data-tip="${tipName}" data-species="${species}"`;
+  const tipData = `data-tip="${escapeHtml(tipName)}" data-species="${escapeHtml(species)}"`;
   appendIconShape(fragments, cx, cy, r, {
     icon,
     fill,
@@ -676,7 +677,7 @@ function drawTipDot(fragments, cx, cy, node, checkedSpecies) {
     drawTipIcon(fragments, cx, cy, r, fill, node.name, node.sp || "", marker.icon);
   } else {
     const color = marker ? (marker.color || spColor) : isName ? "#2563eb" : spColor;
-    fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" class="tip-dot" data-tip="${node.name}" data-species="${node.sp || ""}"/>`);
+    fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${escapeHtml(color)}" class="tip-dot" data-tip="${escapeHtml(node.name)}" data-species="${escapeHtml(node.sp || "")}"/>`);
   }
 }
 
@@ -691,7 +692,7 @@ function drawTipLabel(fragments, x, y, rotation, node, checkedSpecies) {
   const transform = rotation ? ` transform="rotate(${rotation},${x},${y})"` : "";
   const label = getTipLabelText(node);
   const suffix = marker && marker.text ? ` [${marker.text}]` : "";
-  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}" font-size="${state.tipLabelSize}"${bold}${transform} data-tip="${node.name}" data-species="${node.sp || ""}">${label}${suffix}</text>`);
+  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${escapeHtml(color)}" font-size="${state.tipLabelSize}"${bold}${transform} data-tip="${escapeHtml(node.name)}" data-species="${escapeHtml(node.sp || "")}">${escapeHtml(label)}${escapeHtml(suffix)}</text>`);
   if (isMotif && motifColors.length > 0) {
     drawMotifPie(fragments, x - 4, y - 3, 3, motifColors);
   }
@@ -710,7 +711,7 @@ function drawTipLabelRadial(fragments, x, y, angleDeg, anchor, node, checkedSpec
   const bold = highlight ? ' font-weight="bold"' : "";
   const label = getTipLabelText(node);
   const suffix = marker && marker.text ? ` [${marker.text}]` : "";
-  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}" font-size="${state.tipLabelSize}"${bold} text-anchor="${anchor}" transform="rotate(${angleDeg},${x},${y})" data-tip="${node.name}" data-species="${node.sp || ""}">${label}${suffix}</text>`);
+  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${escapeHtml(color)}" font-size="${state.tipLabelSize}"${bold} text-anchor="${anchor}" transform="rotate(${angleDeg},${x},${y})" data-tip="${escapeHtml(node.name)}" data-species="${escapeHtml(node.sp || "")}">${escapeHtml(label)}${escapeHtml(suffix)}</text>`);
   if (isMotif && motifColors.length > 0) {
     const rad = angleDeg * Math.PI / 180;
     drawMotifPie(fragments, x - 6 * Math.cos(rad), y - 6 * Math.sin(rad), 3, motifColors);
@@ -751,8 +752,8 @@ function appendCollapsedRectangular(out, node) {
   const triW = 30 * state.triangleScale / 100;
   const triLabel = state.nodeLabels[node.id] ? `${state.nodeLabels[node.id]} (${node.tipCount})` : `${node.tipCount} tips`;
   out.push(
-    `<polygon points="${node.x},${node.y} ${node.x + triW},${node.y - triH / 2} ${node.x + triW},${node.y + triH / 2}" fill="${resolveTriangleFill(node)}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
-    `<text x="${node.x + triW + 4}" y="${node.y + 3}" font-size="9" fill="#666">${triLabel}</text>`
+    `<polygon points="${node.x},${node.y} ${node.x + triW},${node.y - triH / 2} ${node.x + triW},${node.y + triH / 2}" fill="${escapeHtml(resolveTriangleFill(node))}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+    `<text x="${node.x + triW + 4}" y="${node.y + 3}" font-size="9" fill="#666">${escapeHtml(triLabel)}</text>`
   );
   drawNodeDot(out, node.x, node.y, node);
   drawCollapsedTipMarkers(out, node.x + triW + 4, node.y, node, 0, 12);
@@ -765,7 +766,7 @@ function appendCollapsedCircular(out, node, nx, ny, toXY) {
   const [wx2, wy2] = toXY(wedgeR, node.angle + halfArc);
   const large = halfArc * 2 > Math.PI ? 1 : 0;
   out.push(
-    `<path d="M${nx},${ny} L${wx1},${wy1} A${wedgeR},${wedgeR} 0 ${large},1 ${wx2},${wy2} Z" fill="${resolveTriangleFill(node)}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+    `<path d="M${nx},${ny} L${wx1},${wy1} A${wedgeR},${wedgeR} 0 ${large},1 ${wx2},${wy2} Z" fill="${escapeHtml(resolveTriangleFill(node))}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
     `<text x="${(wx1 + wx2) / 2 + 4}" y="${(wy1 + wy2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
   );
   drawNodeDot(out, nx, ny, node);
@@ -780,7 +781,7 @@ function appendCollapsedUnrooted(out, node) {
   const x2 = node.x + fanLen * Math.cos(node.angle + halfW);
   const y2 = node.y + fanLen * Math.sin(node.angle + halfW);
   out.push(
-    `<polygon points="${node.x},${node.y} ${x1},${y1} ${x2},${y2}" fill="${resolveTriangleFill(node)}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
+    `<polygon points="${node.x},${node.y} ${x1},${y1} ${x2},${y2}" fill="${escapeHtml(resolveTriangleFill(node))}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
     `<text x="${(x1 + x2) / 2 + 2}" y="${(y1 + y2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
   );
   drawNodeDot(out, node.x, node.y, node);
@@ -914,7 +915,7 @@ function renderVisibleHitTargets() {
     } else {
       fragments.push(
         `<circle cx="${entry.x}" cy="${entry.y}" r="${radius}" fill="transparent" class="tree-hit-target" ` +
-        `data-nodeid="${entry.nodeId}"${entry.support != null ? ` data-support="${entry.support}"` : ""}/>`
+        `data-nodeid="${entry.nodeId}"${entry.support != null ? ` data-support="${escapeHtml(entry.support)}"` : ""}/>`
       );
     }
   }
@@ -1093,7 +1094,7 @@ function emitPathsByColor(fragments, entries) {
     else byColor.set(entry.color, [entry.d]);
   }
   for (const [color, segments] of byColor) {
-    fragments.push(`<path d="${segments.join("")}" stroke="${color}" stroke-width="1" fill="none"/>`);
+    fragments.push(`<path d="${segments.join("")}" stroke="${escapeHtml(color)}" stroke-width="1" fill="none"/>`);
   }
 }
 
@@ -1129,19 +1130,19 @@ function emitFastTrianglesAndDots(fragments, triangles, dotData) {
     const path = group.dots.map(dot =>
       `M${dot.cx - r},${dot.cy}a${r},${r} 0 1,0 ${r * 2},0a${r},${r} 0 1,0 ${-r * 2},0`
     ).join("");
-    fragments.push(`<path d="${path}" fill="${group.fill}" class="${group.className}" pointer-events="none"/>`);
+    fragments.push(`<path d="${path}" fill="${escapeHtml(group.fill)}" class="${group.className}" pointer-events="none"/>`);
   }
 
   const d = state.dotSize;
   for (const dot of dotData) {
     if (dot.isTip) continue;
     if (state.showBootstraps && dot.sup != null) {
-      fragments.push(`<text x="${dot.cx + d * 2}" y="${dot.cy - d * 1.7}" class="bootstrap-label">${dot.sup}</text>`);
+      fragments.push(`<text x="${dot.cx + d * 2}" y="${dot.cy - d * 1.7}" class="bootstrap-label">${escapeHtml(dot.sup)}</text>`);
     }
     if (state.nodeLabels[dot.nodeId]) {
       const textColor = state.nodeLabelColors[dot.nodeId] || "";
-      const fillAttr = textColor ? ` fill="${textColor}"` : "";
-      fragments.push(`<text x="${dot.cx + d * 2.5}" y="${dot.cy + d * 1.3}" class="node-label" font-size="${state.labelFontSize}"${fillAttr}>${state.nodeLabels[dot.nodeId]}</text>`);
+      const fillAttr = textColor ? ` fill="${escapeHtml(textColor)}"` : "";
+      fragments.push(`<text x="${dot.cx + d * 2.5}" y="${dot.cy + d * 1.3}" class="node-label" font-size="${state.labelFontSize}"${fillAttr}>${escapeHtml(state.nodeLabels[dot.nodeId])}</text>`);
     }
   }
 }
@@ -1237,8 +1238,8 @@ function drawRectangularHeatmap(fragments, heatmapRows, startX) {
         const fill = getHeatmapColor(heatmap, cell.value);
         const cls = cell.value == null ? "heatmap-cell heatmap-cell-missing" : "heatmap-cell";
         fragments.push(
-          `<rect x="${x}" y="${y}" width="${cellWidth}" height="${cellHeight}" fill="${fill}" class="${cls}" ` +
-          `data-heatmap="1" data-heatmap-tip="${node.name}" data-column="${escapeHtml(column)}" data-dataset="${escapeHtml(heatmap.name)}" ` +
+          `<rect x="${x}" y="${y}" width="${cellWidth}" height="${cellHeight}" fill="${escapeHtml(fill)}" class="${cls}" ` +
+          `data-heatmap="1" data-heatmap-tip="${escapeHtml(node.name)}" data-column="${escapeHtml(column)}" data-dataset="${escapeHtml(heatmap.name)}" ` +
           `data-raw-value="${escapeHtml(cell.raw || "")}" data-value="${cell.value == null ? "" : cell.value}"/>`
         );
       });
@@ -1310,7 +1311,7 @@ function buildAnnularCellPath(innerR, outerR, startAngle, endAngle, fill, cls, m
   const y4 = innerR * Math.sin(endAngle);
 
   const attrs = [
-    `fill="${fill}"`,
+    `fill="${escapeHtml(fill)}"`,
     `class="${cls}"`,
     'data-heatmap="1"',
     `data-heatmap-tip="${escapeHtml(meta.tip)}"`,
@@ -1321,14 +1322,6 @@ function buildAnnularCellPath(innerR, outerR, startAngle, endAngle, fill, cls, m
   ].join(" ");
 
   return `<path d="M${x1},${y1} L${x2},${y2} A${outerR},${outerR} 0 ${largeArc},1 ${x3},${y3} L${x4},${y4} A${innerR},${innerR} 0 ${largeArc},0 ${x1},${y1} Z" ${attrs}/>`;
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
 
 export function buildExportSVGString() {

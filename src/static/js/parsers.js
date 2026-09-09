@@ -3,76 +3,96 @@
  * Ports of the Python parsers from app.py.
  */
 
-let _nodeCounter = 0;
-
 /**
  * Parse a Newick string into the compact tree format { id, bl, name?, sup?, ch? }.
+ * Preserve underscores literally so labels continue to match FASTA identifiers.
  */
 export function parseNewick(s) {
-  _nodeCounter = 0;
-  s = s.trim().replace(/;+$/, "");
-  const [node] = _parseNode(s, 0);
-  return node;
-}
+  if (typeof s !== "string") throw new Error("Newick input must be text");
+  let pos = 0;
+  let nextId = 0;
+  const numberPattern = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+  const fail = message => { throw new Error(`Invalid Newick at character ${pos + 1}: ${message}`); };
 
-function _parseNode(s, pos) {
-  const children = [];
-  if (pos < s.length && s[pos] === "(") {
-    pos++;
-    while (true) {
-      const [child, newPos] = _parseNode(s, pos);
-      pos = newPos;
-      children.push(child);
-      if (pos < s.length && s[pos] === ",") {
+  function skipIgnored() {
+    while (pos < s.length) {
+      if (/\s/.test(s[pos])) { pos++; continue; }
+      if (s[pos] !== "[") break;
+      let depth = 1;
+      pos++;
+      while (pos < s.length && depth > 0) {
+        if (s[pos] === "[") depth++;
+        if (s[pos] === "]") depth--;
         pos++;
-      } else {
+      }
+      if (depth) fail("unclosed comment");
+    }
+  }
+
+  function readNode(children) {
+    skipIgnored();
+    let label = "";
+    const quoted = s[pos] === "'";
+    if (quoted) {
+      pos++;
+      let closed = false;
+      while (pos < s.length) {
+        const char = s[pos++];
+        if (char !== "'") { label += char; continue; }
+        if (s[pos] === "'") { label += "'"; pos++; continue; }
+        closed = true;
         break;
       }
-    }
-    if (pos < s.length && s[pos] === ")") {
-      pos++;
-    }
-  }
-
-  let label = "";
-  while (pos < s.length && !",):;".includes(s[pos])) {
-    label += s[pos];
-    pos++;
-  }
-
-  let bl = 0;
-  if (pos < s.length && s[pos] === ":") {
-    pos++;
-    let blStr = "";
-    while (pos < s.length && !",);".includes(s[pos])) {
-      blStr += s[pos];
-      pos++;
-    }
-    const parsed = parseFloat(blStr);
-    bl = isNaN(parsed) ? 0 : parsed;
-  }
-
-  const nid = _nodeCounter++;
-
-  let sup = null;
-  let name = "";
-  if (children.length > 0) {
-    const num = parseFloat(label);
-    if (!isNaN(num) && label.trim() !== "") {
-      sup = num;
+      if (!closed) fail("unclosed quoted label");
     } else {
-      name = label;
+      while (pos < s.length && !/[\s()[\],:;']/.test(s[pos])) label += s[pos++];
     }
-  } else {
-    name = label;
+    skipIgnored();
+    let bl = 0;
+    if (s[pos] === ":") {
+      pos++;
+      skipIgnored();
+      let token = "";
+      while (pos < s.length && !/[\s()[\],:;']/.test(s[pos])) token += s[pos++];
+      if (!numberPattern.test(token) || !Number.isFinite(Number(token))) fail("invalid branch length");
+      bl = Number(token);
+      skipIgnored();
+    }
+    const node = { id: nextId++, bl };
+    if (children) node.ch = children;
+    if (children && !quoted && numberPattern.test(label) && Number.isFinite(Number(label))) node.sup = Number(label);
+    else if (label) node.name = label;
+    return node;
   }
 
-  const node = { id: nid, bl };
-  if (name) node.name = name;
-  if (sup !== null) node.sup = sup;
-  if (children.length > 0) node.ch = children;
-
-  return [node, pos];
+  const frames = [];
+  let root;
+  // Explicit frames also avoid consuming the JS call stack for deep trees.
+  parse: while (true) {
+    skipIgnored();
+    if (pos >= s.length || s[pos] === ";") fail("expected a tree or subtree");
+    if (s[pos] === "(") {
+      frames.push([]);
+      pos++;
+      continue;
+    }
+    let node = readNode(null);
+    while (true) {
+      if (frames.length === 0) { root = node; break parse; }
+      frames[frames.length - 1].push(node);
+      skipIgnored();
+      if (s[pos] === ",") { pos++; break; }
+      if (s[pos] !== ")") fail("expected ',' or ')'");
+      pos++;
+      node = readNode(frames.pop());
+    }
+  }
+  skipIgnored();
+  if (s[pos] !== ";") fail("expected terminating ';'");
+  pos++;
+  skipIgnored();
+  if (pos !== s.length) fail("unexpected content after the tree");
+  return root;
 }
 
 /**

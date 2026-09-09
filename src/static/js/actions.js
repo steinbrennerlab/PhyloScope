@@ -1,3 +1,5 @@
+import { escapeHtml } from "./html-utils.js";
+import { validateSession } from "./session.js";
 import { dom, MOTIF_PALETTE, PALETTE, resetClientState, state } from "./state.js";
 import {
   collectAllTipNames,
@@ -1478,9 +1480,9 @@ function showLoadedInfo(totalTips) {
   section.style.display = "";
   const lines = [];
   const tipStr = totalTips != null ? ` <span class="loaded-label">(${totalTips} tips)</span>` : "";
-  lines.push(`<span class="loaded-label">Tree:</span> <span class="loaded-value">${state.nwkName || "unknown"}</span>${tipStr}`);
+  lines.push(`<span class="loaded-label">Tree:</span> <span class="loaded-value">${escapeHtml(state.nwkName || "unknown")}</span>${tipStr}`);
   if (state.hasFasta && state.aaName) {
-    lines.push(`<span class="loaded-label">Alignment:</span> <span class="loaded-value">${state.aaName}</span> <span class="loaded-label">(${state.numSeqs} seqs)</span>`);
+    lines.push(`<span class="loaded-label">Alignment:</span> <span class="loaded-value">${escapeHtml(state.aaName)}</span> <span class="loaded-label">(${state.numSeqs} seqs)</span>`);
   } else {
     lines.push(`<span class="loaded-label">Alignment:</span> <span class="loaded-none">none</span>`);
   }
@@ -1489,12 +1491,12 @@ function showLoadedInfo(totalTips) {
   } else {
     lines.push(`<span class="loaded-label">Species:</span> <span class="loaded-none">none</span>`);
   }
-  lines.push(`<span class="loaded-label">Species source:</span> <span class="loaded-value">${getSpeciesSourceLabel()}</span>`);
+  lines.push(`<span class="loaded-label">Species source:</span> <span class="loaded-value">${escapeHtml(getSpeciesSourceLabel())}</span>`);
   lines.push(`<span class="loaded-label">Datasets:</span> <span class="loaded-value">${state.datasetFiles.length}</span>`);
   const experimentalSummary = getExperimentalSummary();
   lines.push(
     experimentalSummary
-      ? `<span class="loaded-label">Experimental:</span> <span class="loaded-value">${experimentalSummary}</span>`
+      ? `<span class="loaded-label">Experimental:</span> <span class="loaded-value">${escapeHtml(experimentalSummary)}</span>`
       : `<span class="loaded-label">Experimental:</span> <span class="loaded-none">none</span>`
   );
   el.innerHTML = lines.join("<br>");
@@ -1869,7 +1871,7 @@ function openExportPanel(nodeId) {
   if (missingTips.length > 0) {
     infoEl.innerHTML =
       `Node #${nodeId}${apeNumberSuffix(nodeId)} \u2014 ${tips.length} tip${tips.length !== 1 ? "s" : ""}` +
-      `<br><span style="color:#c0392b">${missingTips.length} tip${missingTips.length !== 1 ? "s" : ""} not in alignment: ${missingTips.slice(0, 5).join(", ")}${missingTips.length > 5 ? ", ..." : ""}</span>`;
+      `<br><span style="color:#c0392b">${missingTips.length} tip${missingTips.length !== 1 ? "s" : ""} not in alignment: ${escapeHtml(missingTips.slice(0, 5).join(", "))}${missingTips.length > 5 ? ", ..." : ""}</span>`;
   } else {
     infoEl.textContent = `Node #${nodeId}${apeNumberSuffix(nodeId)} \u2014 ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
   }
@@ -1934,7 +1936,7 @@ function updateExportPreview() {
       ? seq.slice(sliceStart || 0, sliceEnd || seq.length)
       : seq;
     const display = sliced.length > maxChars ? sliced.slice(0, maxChars) + "\u2026" : sliced;
-    lines.push(`<span class="seq-name">&gt;${tip}</span>\n${display}`);
+    lines.push(`<span class="seq-name">&gt;${escapeHtml(tip)}</span>\n${escapeHtml(display)}`);
   }
   if (tips.length > maxSeqs) {
     lines.push(`<span class="seq-ellipsis">\u2026 and ${tips.length - maxSeqs} more sequences</span>`);
@@ -2439,8 +2441,26 @@ function loadSession(fromSetup = false) {
 }
 
 async function loadSessionV2(session, fromSetup) {
-  // Reconstruct workspace from source texts
+  // Prepare and validate all imported data before replacing a live workspace.
+  session = validateSession(session);
   const workspace = loadFromSourceTexts(session.sourceTexts);
+  if (Object.keys(workspace.tipToSpecies).length > 0) {
+    annotateSpecies(session.treeData, workspace.tipToSpecies);
+    if (session.fullTreeData) annotateSpecies(session.fullTreeData, workspace.tipToSpecies);
+  }
+  const parsedDatasets = {};
+  const treeTips = new Set(collectAllTipNames(session.fullTreeData || session.treeData));
+  for (const heatmap of session.activeHeatmaps || []) {
+    const source = (session.sourceTexts.datasets || []).find(dataset => dataset.name === heatmap.name);
+    if (!source) throw new Error(`Session dataset not found: ${heatmap.name}`);
+    const result = parseDatasetText(source.text, source.name, treeTips);
+    if (result.error) throw new Error(result.error);
+    parsedDatasets[source.name] = result.data;
+  }
+
+  // Undo snapshots contain topology, not source data. They cannot cross datasets.
+  resetClientState();
+  clearUiForReset();
 
   // Populate state with workspace data
   state.loaded = true;
@@ -2464,17 +2484,11 @@ async function loadSessionV2(session, fromSetup) {
   for (const d of (session.sourceTexts.datasets || [])) {
     state.datasetTextsByName[d.name] = d.text;
   }
-  state.parsedDatasets = {};
+  state.parsedDatasets = parsedDatasets;
 
   // Use saved tree data (may be rerooted/subtree-focused)
   state.treeData = session.treeData;
   state.fullTreeData = session.fullTreeData || null;
-
-  // Re-annotate species on saved tree
-  if (Object.keys(state.tipToSpecies).length > 0) {
-    annotateSpecies(state.treeData, state.tipToSpecies);
-    if (state.fullTreeData) annotateSpecies(state.fullTreeData, state.tipToSpecies);
-  }
 
   if (fromSetup) hideSetup();
 
@@ -2523,6 +2537,7 @@ async function loadSessionV2(session, fromSetup) {
 }
 
 function loadSessionV1(session, fromSetup) {
+  session = validateSession(session);
   if (fromSetup) {
     dom.setupError.textContent = "This is a v1 session. Please load your data files first using the folder/file picker, then load this session from the Session panel in the sidebar.";
     return;

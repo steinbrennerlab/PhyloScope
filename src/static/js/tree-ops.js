@@ -63,18 +63,26 @@ export function nodeToNewick(node) {
     if (node.sup != null) {
       s += String(node.sup);
     } else if (node.name) {
-      s += node.name;
+      s += quoteNewickLabel(node.name, true);
     }
     if (node.bl != null && node.bl !== 0) {
       s += `:${node.bl}`;
     }
     return s;
   }
-  let s = node.name || "";
+  let s = quoteNewickLabel(node.name || "");
   if (node.bl != null && node.bl !== 0) {
     s += `:${node.bl}`;
   }
   return s;
+}
+
+function quoteNewickLabel(label, internal = false) {
+  const text = String(label);
+  // Quote numeric internal names to distinguish them from support values.
+  return /[\s()[\],:;']/.test(text) || (internal && text !== "" && Number.isFinite(Number(text)))
+    ? `'${text.replaceAll("'", "''")}'`
+    : text;
 }
 
 /**
@@ -256,6 +264,19 @@ export function rerootTree(treeData, targetId) {
   const target = findNodeById(treeData, targetId);
   if (!target) return null;
 
+  if (!target.ch || target.ch.length === 0) {
+    // A tip must remain a leaf: put a new root halfway along its incoming edge.
+    // Existing IDs (and their annotations) survive; only the new root needs an ID.
+    const newId = Object.keys(parentMap).reduce((max, id) => Math.max(max, Number(id)), treeData.id) + 1;
+    const halfLength = (target.bl || 0) / 2;
+    const rest = rerootTree(treeData, parentMap[target.id].id);
+    rest.ch = rest.ch.filter(child => child.id !== target.id);
+    if (rest.ch.length === 0) { target.bl = 0; return target; }
+    target.bl = halfLength;
+    rest.bl = halfLength;
+    return { id: newId, bl: 0, ch: [target, rest] };
+  }
+
   const path = [target];
   let cur = target;
   while (parentMap[cur.id]) {
@@ -279,6 +300,10 @@ export function rerootTree(treeData, targetId) {
   target.bl = 0;
 
   const oldRoot = path[path.length - 1];
+  if (oldRoot.ch && oldRoot.ch.length === 0) {
+    const newParent = path[path.length - 2];
+    newParent.ch = newParent.ch.filter(child => child.id !== oldRoot.id);
+  }
   if (oldRoot.ch && oldRoot.ch.length === 1) {
     const onlyChild = oldRoot.ch[0];
     onlyChild.bl = (onlyChild.bl || 0) + (oldRoot.bl || 0);
