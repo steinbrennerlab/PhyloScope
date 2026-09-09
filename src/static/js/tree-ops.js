@@ -244,84 +244,99 @@ export function findNodesWithSpecies(node, requiredSpecies, excludedSpecies) {
 }
 
 /**
- * Re-root the tree at the given node ID.
- * Returns the new root node, or null if not found.
+ * Root on the incoming edge of the selected tip or clade, keeping that clade
+ * intact. Length and support belong to undirected edges, not their endpoints.
+ * Existing node IDs survive except when suppressing an obsolete degree-two root.
+ * Mutates the tree and returns a new root, or null when the target is missing.
  */
 export function rerootTree(treeData, targetId) {
   if (treeData.id === targetId) return treeData;
 
-  const parentMap = {};
-  function buildParentMap(node) {
-    if (node.ch) {
-      for (const c of node.ch) {
-        parentMap[c.id] = node;
-        buildParentMap(c);
-      }
+  const adjacency = new Map();
+  const parents = new Map();
+  const stack = [treeData];
+  let target = null;
+  let maxId = treeData.id;
+  function neighbors(node) {
+    if (!adjacency.has(node)) adjacency.set(node, []);
+    return adjacency.get(node);
+  }
+  function connect(a, b, edge) {
+    neighbors(a).push({ node: b, edge });
+    neighbors(b).push({ node: a, edge });
+  }
+  function disconnect(a, b) {
+    adjacency.set(a, neighbors(a).filter(link => link.node !== b));
+    adjacency.set(b, neighbors(b).filter(link => link.node !== a));
+  }
+  while (stack.length) {
+    const node = stack.pop();
+    maxId = Math.max(maxId, node.id);
+    if (node.id === targetId) target = node;
+    neighbors(node);
+    for (const child of node.ch || []) {
+      connect(node, child, { length: child.bl || 0, support: child.sup });
+      parents.set(child, node);
+      stack.push(child);
     }
   }
-  buildParentMap(treeData);
-
-  const target = findNodeById(treeData, targetId);
   if (!target) return null;
+  let opposite = parents.get(target);
 
-  if (!target.ch || target.ch.length === 0) {
-    // A tip must remain a leaf: put a new root halfway along its incoming edge.
-    // Existing IDs (and their annotations) survive; only the new root needs an ID.
-    const newId = Object.keys(parentMap).reduce((max, id) => Math.max(max, Number(id)), treeData.id) + 1;
-    const halfLength = (target.bl || 0) / 2;
-    const rest = rerootTree(treeData, parentMap[target.id].id);
-    rest.ch = rest.ch.filter(child => child.id !== target.id);
-    if (rest.ch.length === 0) { target.bl = 0; return target; }
-    target.bl = halfLength;
-    rest.bl = halfLength;
-    return { id: newId, bl: 0, ch: [target, rest] };
+  // Drop dangling unary root stems: they have no nonempty bipartition and
+  // would otherwise turn into extra tips when their direction is reversed.
+  let oldRoot = treeData;
+  while (neighbors(oldRoot).length === 1) {
+    if (oldRoot === target) return treeData; // The selected clade is the whole tree.
+    const next = neighbors(oldRoot)[0].node;
+    disconnect(oldRoot, next);
+    adjacency.delete(oldRoot);
+    oldRoot = next;
   }
+  if (oldRoot === target && !adjacency.has(opposite)) return treeData;
 
-  const path = [target];
-  let cur = target;
-  while (parentMap[cur.id]) {
-    cur = parentMap[cur.id];
-    path.push(cur);
-  }
-
-  const origBls = path.map(n => n.bl);
-
-  for (let i = 0; i < path.length - 1; i++) {
-    const child = path[i];
-    const parent = path[i + 1];
-    parent.ch = parent.ch.filter(c => c.id !== child.id);
-    if (!child.ch) child.ch = [];
-    child.ch.push(parent);
-  }
-
-  for (let i = 0; i < path.length - 1; i++) {
-    path[i + 1].bl = origBls[i];
-  }
-  target.bl = 0;
-
-  const oldRoot = path[path.length - 1];
-  if (oldRoot.ch && oldRoot.ch.length === 0) {
-    const newParent = path[path.length - 2];
-    newParent.ch = newParent.ch.filter(child => child.id !== oldRoot.id);
-  }
-  if (oldRoot.ch && oldRoot.ch.length === 1) {
-    const onlyChild = oldRoot.ch[0];
-    onlyChild.bl = (onlyChild.bl || 0) + (oldRoot.bl || 0);
-    if (oldRoot.sup != null && onlyChild.sup == null) {
-      onlyChild.sup = oldRoot.sup;
+  // A degree-two root represents one edge in two pieces. Suppress it before
+  // selecting/splitting an edge again, including repeated re-rooting.
+  if (neighbors(oldRoot).length === 2) {
+    const [a, b] = neighbors(oldRoot);
+    const supportA = a.edge.support;
+    const supportB = b.edge.support;
+    if (supportA != null && supportB != null && supportA !== supportB) {
+      throw new Error("Cannot re-root: the two sides of the existing root edge have conflicting support values.");
     }
-    if (path.length >= 2) {
-      const newParent = path[path.length - 2];
-      newParent.ch = newParent.ch.map(c => c.id === oldRoot.id ? onlyChild : c);
-    }
+    const edge = {
+      length: a.edge.length + b.edge.length,
+      support: supportA ?? supportB,
+    };
+    disconnect(oldRoot, a.node);
+    disconnect(oldRoot, b.node);
+    adjacency.delete(oldRoot);
+    connect(a.node, b.node, edge);
+    if (opposite === oldRoot) opposite = a.node === target ? b.node : a.node;
   }
 
-  // Node ids are deliberately left alone. Re-rooting only re-hangs existing nodes,
-  // so keeping their ids keeps every id-keyed annotation (clade labels, clade colors,
-  // ape/ggtree numbers) pointing at the node the user attached it to. Ids stay unique
-  // but no longer dense, which the rest of the app already handles - subtree focus
-  // produces sparse ids the same way.
-  return target;
+  const link = neighbors(target).find(item => item.node === opposite);
+  if (!link) return treeData; // No incoming edge for a whole-tree selection.
+  const root = { id: maxId + 1, bl: 0 };
+  const firstHalf = link.edge.length / 2;
+  disconnect(target, opposite);
+  connect(root, target, { length: firstHalf, support: link.edge.support });
+  connect(root, opposite, { length: link.edge.length - firstHalf, support: link.edge.support });
+
+  // Orient each edge away from the new root. Missing support must also be
+  // transferred (delete the old value), or old-root labels can leak onto edges.
+  const pending = [{ node: root, parent: null, edge: null }];
+  while (pending.length) {
+    const { node, parent, edge } = pending.pop();
+    delete node.sup;
+    node.bl = edge ? edge.length : 0;
+    if (edge?.support != null) node.sup = edge.support;
+    const children = neighbors(node).filter(item => item.node !== parent);
+    if (children.length) node.ch = children.map(item => item.node);
+    else delete node.ch;
+    for (const child of children) pending.push({ node: child.node, parent: node, edge: child.edge });
+  }
+  return root;
 }
 
 /**

@@ -1440,7 +1440,7 @@ function applyFastaState() {
     state.showLengths = false;
     exportInfo.textContent = "No alignment loaded";
     exportForm.style.display = "none";
-    subtreeHint.innerHTML = "Click: select node<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation<br>Ctrl+Shift+click: re-root at node";
+    subtreeHint.innerHTML = "Click: select node<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation<br>Ctrl+Shift+click: root on incoming branch";
     return;
   }
 
@@ -1448,7 +1448,7 @@ function applyFastaState() {
   motifSearch.disabled = false;
   motifType.disabled = false;
   lengthToggle.disabled = false;
-  subtreeHint.innerHTML = "Click: select node &amp; copy FASTA<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation<br>Ctrl+Shift+click: re-root at node";
+  subtreeHint.innerHTML = "Click: select node &amp; copy FASTA<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation<br>Ctrl+Shift+click: root on incoming branch";
 }
 
 // ---------------------------------------------------------------------------
@@ -1511,6 +1511,7 @@ function captureState() {
     // Tree operations replace topology objects, so view-state snapshots can
     // share them instead of cloning every node on each control interaction.
     treeData: state.treeData,
+    treeRerooted: state.treeRerooted,
     collapsedNodes: new Set(state.collapsedNodes),
     exportNodeId: state.exportNodeId,
     selectedTip: state.selectedTip,
@@ -1542,6 +1543,7 @@ function captureState() {
 
 function restoreState(snapshot) {
   state.treeData = snapshot.treeData;
+  state.treeRerooted = snapshot.treeRerooted ?? false;
   state.collapsedNodes = snapshot.collapsedNodes;
   state.exportNodeId = snapshot.exportNodeId;
   state.selectedTip = snapshot.selectedTip;
@@ -1703,14 +1705,25 @@ function goToApeNode() {
 // ---------------------------------------------------------------------------
 
 function rerootAt(nodeId) {
-  pushUndo();
   // Rerooting mutates its input; clone only for this structural operation so
   // lightweight undo snapshots can safely share all other tree objects.
-  const newRoot = rerootTree(deepCopyNode(state.treeData), nodeId);
+  const copy = deepCopyNode(state.treeData);
+  let newRoot;
+  try {
+    newRoot = rerootTree(copy, nodeId);
+  } catch (error) {
+    setTooltip(error.message);
+    return;
+  }
   if (!newRoot) {
     setTooltip("Re-root failed: node not found");
     return;
   }
+  if (newRoot === copy) {
+    setTooltip("Select a tip or clade below the root to re-root on its incoming branch");
+    return;
+  }
+  pushUndo();
 
   // Re-annotate species if mapping exists
   if (Object.keys(state.tipToSpecies).length > 0) {

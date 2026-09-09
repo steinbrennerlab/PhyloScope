@@ -2,22 +2,22 @@
 
 Updated 2026-09-09. This is the current review/fix list. The original standalone migration plan is retained below as historical context; the shipped build is now `docs/`.
 
-## Remaining fixes, in priority order
+## Fix status, in priority order
 
-### Critical / high: re-rooting is reopened
+### Re-rooting repair completed and verified
 
-- [ ] **R1 — Critical: preserve support on its bipartition.** When an edge reverses direction, its support must move together with its length. The current implementation moves lengths but leaves support on node objects. Confirmed reproduction: `(((O1:1,O2:1)100:2,A:1)54:3,B:1,C:1);` rooted at the O1/O2 MRCA changes the outgroup support from 100 to 54 and loses the support on the next bipartition. Topology and patristic-distance tests alone do not detect this.
-- [ ] **R2 — High: root on the outgroup stem, not at its MRCA.** Insert a root on the selected clade's incoming edge so the outgroup remains a complete root child. The reported tree must have basal groups of 2 and 289 tips, instead of 1, 1, and 289. The earlier fix only added edge rooting for individual tips.
-- [ ] **R3 — Low, complete with R1: remove orphaned root support.** The new root has no incoming edge and must not inherit a spurious `)100;` label. Support must remain on the appropriate represented bipartition.
+- [x] **R1: Preserve support on its bipartition.** Re-rooting now transfers length and support together on undirected edges, including absent support. The old node-attached support-shifting behavior is covered by the pinned negative fixture.
+- [x] **R2: Root on the outgroup stem.** Tip and internal-clade selections insert a two-child root on the incoming edge, retaining the complete selected outgroup. Verified root splits: RLP 2/289, XI 49/157, XII 5/175.
+- [x] **R3: Remove orphaned root support.** New roots have no label or incoming length; both root children carry the original stem support and their lengths sum to its length. Existing degree-two roots are suppressed before re-rooting; conflicting explicit support values are reported instead of silently choosing one.
 
-Acceptance checks for this repair, based on the supplied report summary:
+Validation completed:
 
-1. Preserve the tip set, tip IDs, topology as unrooted bipartitions, and patristic distances.
-2. Compare every canonical bipartition's length and support before/after. Account for the two new root edges as representations of one original edge: compare their combined length and consistent support, rather than overwriting duplicate split keys. Use a stated numeric tolerance for computed lengths.
-3. Require two root children for outgroup-edge rooting, with the exact requested outgroup as one child. Check the reported 2/289 split and a small synthetic fixture.
-4. Require no orphaned support label on the new root and no lost or reassigned support on reversed edges.
-5. Add the exact three family trees and known-good values as regression fixtures when available. The report states 288/203/177 supports and outgroup stems 10/3/5 edges from the input roots; XII is 5 edges, XI is 3. Independently check the reported `ete3.set_outgroup()` results as a possible oracle. The full report and family fixtures have not yet been supplied in this workspace.
-6. Exercise Newick export/reparse and session save/load of the re-rooted result; ensure bipartition attributes survive both. Add these checks to the automated suite before marking re-rooting complete.
+- Copied the supplied report, pinned family fixtures, and unchanged `validate_reroot.py` into `src/tests/fixtures/`. Source depths are RLP 10, XI 3, XII 5; internal support counts are 288/203/177.
+- All three known-good outputs pass the Python checker **8/8, exit 0**.
+- The known-buggy RLP output still fails **4/8, exit 1**, at checks 4, 6, 7, and 8. Its topology and branch-length checks still pass, as required for this negative control.
+- All three newly generated PhyloScope outputs pass **8/8, exit 0**, preserving every bipartition's support and length and the requested outgroup.
+- **19 JavaScript tests pass**, including the same bipartition checks after export/reparse, session load, and UI-action undo/redo; repeated tip/clade re-rooting; missing support; and explicit rejection of conflicting root-edge supports.
+- Reproduce the independent check with `npm run test:reroot-validator` in `src/` (Python with ete3 required). No Python dependency was added to the browser app. Numeric root halves are unrounded; preserving six-decimal source formatting remains E1 below.
 
 ### Medium: scientific calculations and large inputs
 
@@ -33,7 +33,7 @@ Acceptance checks for this repair, based on the supplied report summary:
 ### Follow-up improvements and verification
 
 - [ ] **Q1 — Import validation report.** Flag duplicate FASTA identifiers, unequal alignment lengths, unmatched tips, and malformed numeric cells. Duplicate IDs currently overwrite sequences, and `12oops` is accepted as 12.
-- [ ] **Q2 — Expand regression coverage and add CI.** The initial 13 tests pass, but do not establish support/bipartition preservation. Add the re-rooting acceptance checks and regressions for the remaining fixes, then automate tests and build checks in CI.
+- [ ] **Q2 — Expand regression coverage and add CI.** The suite now has 19 passing tests, including support/bipartition preservation and positive/negative fixtures. Add regressions for the remaining fixes, then automate the tests, independent validator, and build checks in CI.
 - [ ] **Q3 — Browser verification.** Exercise loading, re-rooting, undo/redo, all layouts, exports, and session replacement in a real browser. No browser was connected during the first fix pass; DOM stand-in tests are not browser interaction tests.
 - [ ] **Q4 — Separate domain state from DOM/UI code.** Continue extracting session/history and scientific operations from the large `actions.js` module; importing tree utilities still indirectly accesses `document`.
 
@@ -42,7 +42,7 @@ Acceptance checks for this repair, based on the supplied report summary:
 - [x] Strict Newick structure and branch-length validation; quoted labels, escaped quotes, comments, and quoted export round trips; iterative parsing with unchanged postorder IDs for existing examples.
 - [x] HTML/SVG escaping of imported labels, annotations, filenames, and sequence previews; validation of session-supplied rendering settings.
 - [x] Session replacement clears old undo/redo history and transient workspace state; malformed saved data/settings are checked before replacing the live workspace.
-- [x] Individual-tip re-rooting preserves leaves, tip IDs, and distances. **Partial re-rooting fix only; R1–R3 above remain open.**
+- [x] The initial tip-only preservation fix has been superseded by the verified R1–R3 edge-rooting repair above.
 - [x] Initial 13 regression tests and rebuilt `docs/` distribution verified against source. Build now overwrites generated files without deleting the output directory, avoiding the observed Windows directory-deletion failure.
 
 ---

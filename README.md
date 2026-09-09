@@ -48,6 +48,8 @@ Requires Node.js 18+.
 
 Run the regression tests from `src/` with `npm test` (use `npm.cmd test` in Windows PowerShell). Tests cover Newick parsing/export, re-rooting invariants, imported-label escaping, and session isolation. The session tests use a DOM stand-in; they do not replace browser interaction testing.
 
+The pinned RLP, XI, and XII re-rooting fixtures are in `src/tests/fixtures/reroot_validation/`. Run `npm run test:reroot-validator` from `src/` to check the known-good outputs, require the known-buggy RLP output to fail, and validate freshly generated PhyloScope outputs with the supplied Python checker. This additional check requires Python with `ete3`; set `PHYLOSCOPE_PYTHON` to a Python executable if needed. It does not add a Python dependency to the app. See `src/tests/README.md` for details.
+
 Newick input must contain one complete tree ending in a semicolon. Quoted labels (including doubled single quotes), whitespace, and square-bracket comments are supported. Underscores are preserved literally to keep tree labels aligned with FASTA identifiers. Malformed trees and invalid branch lengths produce an error instead of being partially loaded.
 
 ## Getting Started
@@ -94,7 +96,7 @@ An example dataset is provided in `example_data/`.
 - **Uniform triangles**: toggle to make all collapsed triangles the same size regardless of tip count
 - **Triangle size**: adjustable via slider
 - **Subtree focus**: Ctrl+click an internal node to view its subtree in isolation; click "Back to full tree" to return
-- **Re-root**: Ctrl+Shift+click an internal node to root there, or a tip to insert a root halfway along its incoming branch; tips and pairwise distances are preserved
+- **Re-root**: Ctrl+Shift+click a tip or internal node to insert a two-child root halfway along its incoming branch, preserving the selected clade as one root child. Branch lengths and support stay with their original bipartitions; the two root branches share the original stem's support and their lengths sum to its length. The new root has no support label. If an existing two-child root assigns conflicting supports to the same bipartition, re-rooting reports the conflict without changing the tree.
 - **Pan and zoom**: mouse drag to pan, scroll wheel to zoom
 
 ### Fast Mode (Large Trees)

@@ -1,0 +1,2 @@
+# Preserve supplied fixture bytes, including source whitespace, across platforms.
+src/tests/fixtures/** -text -whitespace

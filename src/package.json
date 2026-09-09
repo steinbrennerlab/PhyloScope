@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "build": "node build.js",
-    "test": "node --experimental-vm-modules --test tests/*.test.cjs"
+    "test": "node --experimental-vm-modules --test tests/*.test.cjs",
+    "test:reroot-validator": "node --experimental-vm-modules tests/validate-reroot.cjs"
   },
   "devDependencies": {
     "esbuild": "^0.24.0"
