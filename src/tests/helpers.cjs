@@ -23,7 +23,7 @@ function element() {
   };
 }
 
-async function harness({ stubRenderer = false, expose = {} } = {}) {
+async function harness({ stubRenderer = false, expose = {}, withoutDocument = false } = {}) {
   const elements = new Map();
   const document = {
     getElementById(id) {
@@ -34,12 +34,12 @@ async function harness({ stubRenderer = false, expose = {} } = {}) {
     querySelector: element, querySelectorAll: () => [], addEventListener() {},
   };
   const context = vm.createContext({
-    console, document, window: { addEventListener() {} },
+    console, ...(!withoutDocument ? { document } : {}), window: { addEventListener() {} },
     requestAnimationFrame() { return 0; }, cancelAnimationFrame() {},
     setTimeout() {}, clearTimeout() {},
   });
   const modules = new Map();
-  async function getModule(file) {
+  function getModule(file) {
     file = path.resolve(file);
     if (!modules.has(file)) {
       let source = fs.readFileSync(file, "utf8");
@@ -54,14 +54,13 @@ async function harness({ stubRenderer = false, expose = {} } = {}) {
         modules.set(file, new vm.SourceTextModule(source, { context, identifier: file }));
       }
     }
-    const mod = modules.get(file);
-    if (mod.status === "unlinked") await mod.link((specifier, parent) => getModule(path.resolve(path.dirname(parent.identifier), specifier)));
-    return mod;
+    return modules.get(file);
   }
   return {
     document,
     async load(name) {
-      const mod = await getModule(path.join(__dirname, "../static/js", `${name}.js`));
+      const mod = getModule(path.join(__dirname, "../static/js", `${name}.js`));
+      if (mod.status === "unlinked") await mod.link((specifier, parent) => getModule(path.resolve(path.dirname(parent.identifier), specifier)));
       if (mod.status !== "evaluated") await mod.evaluate();
       return mod.namespace;
     },

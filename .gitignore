@@ -21,6 +21,7 @@ Thumbs.db
 !example_data/
 !src/
 !docs/
+!.github/
 
 # Build artifacts
 src/node_modules/

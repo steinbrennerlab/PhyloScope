@@ -49,6 +49,7 @@ export function parseNewick(s) {
     }
     skipIgnored();
     let bl = 0;
+    let blText;
     if (s[pos] === ":") {
       pos++;
       skipIgnored();
@@ -56,9 +57,11 @@ export function parseNewick(s) {
       while (pos < s.length && !/[\s()[\],:;']/.test(s[pos])) token += s[pos++];
       if (!numberPattern.test(token) || !Number.isFinite(Number(token))) fail("invalid branch length");
       bl = Number(token);
+      blText = token;
       skipIgnored();
     }
     const node = { id: nextId++, bl };
+    if (blText != null) node.blText = blText;
     if (children) node.ch = children;
     if (children && !quoted && numberPattern.test(label) && Number.isFinite(Number(label))) node.sup = Number(label);
     else if (label) node.name = label;
@@ -99,21 +102,27 @@ export function parseNewick(s) {
  * Parse FASTA text content into an object of { header: sequence }.
  */
 export function parseFastaText(text) {
-  const seqs = {};
+  const seqs = Object.create(null);
   let current = null;
   const lines = text.split(/\r?\n/);
   for (const line of lines) {
     if (line.startsWith(">")) {
       current = line.substring(1).trim().split(/\s+/)[0];
+      if (!current) throw new Error("FASTA contains an empty identifier");
+      if (Object.hasOwn(seqs, current)) throw new Error(`Duplicate FASTA identifier: ${current}`);
       seqs[current] = [];
     } else if (current !== null) {
       seqs[current].push(line.trim());
+    } else if (line.trim()) {
+      throw new Error("FASTA sequence data appears before its identifier");
     }
   }
-  const result = {};
+  const result = Object.create(null);
   for (const [k, v] of Object.entries(seqs)) {
     result[k] = v.join("");
+    if (!result[k]) throw new Error(`Empty FASTA sequence: ${k}`);
   }
+  if (!Object.keys(result).length) throw new Error("FASTA contains no sequences");
   return result;
 }
 
@@ -121,36 +130,30 @@ export function parseFastaText(text) {
  * Convert a PROSITE-style pattern to a JavaScript regex string.
  */
 export function prositeToRegex(pattern) {
-  pattern = pattern.replace(/^\.+|\.+$/g, "").trim();
-  const parts = pattern.split("-");
-  const regexParts = [];
-  for (const part of parts) {
-    if (part === "x" || part === "X") {
-      regexParts.push(".");
-    } else if (part.startsWith("{") && part.endsWith("}")) {
-      regexParts.push(`[^${part.slice(1, -1)}]`);
-    } else if (part.startsWith("[") && part.endsWith("]")) {
-      regexParts.push(part);
-    } else if (part === "<") {
-      regexParts.push("^");
-    } else if (part === ">") {
-      regexParts.push("$");
-    } else {
-      const m = part.match(/^(.+)\((\d+)(?:,(\d+))?\)$/);
-      if (m) {
-        const base = m[1];
-        const baseRegex = prositeToRegex(base);
-        if (m[3]) {
-          regexParts.push(`(?:${baseRegex}){${m[2]},${m[3]}}`);
-        } else {
-          regexParts.push(`(?:${baseRegex}){${m[2]}}`);
-        }
-      } else {
-        regexParts.push(part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-      }
+  let text = pattern.trim().replace(/\.$/, "");
+  const start = text.startsWith("<");
+  // Anchors may be attached directly to the first/last element.
+  if (start) text = text.slice(1).replace(/^-/, "");
+  const terminal = text.endsWith(">");
+  if (terminal) text = text.slice(0, -1).replace(/-$/, "");
+  const parts = text.split("-");
+  const result = parts.map((part, index) => {
+    const match = part.match(/^([A-Za-z]|\[[A-Za-z]+>?\]|\{[A-Za-z]+\})(?:\((\d+)(?:,(\d+))?\))?$/);
+    if (!match) throw new Error(`Invalid PROSITE element: ${part || "(empty)"}`);
+    const token = match[1].toUpperCase();
+    let atom = token === "X" ? "." : token.startsWith("{") ? `[^${token.slice(1, -1)}]` : token;
+    if (token.includes(">")) {
+      if (index !== parts.length - 1 || match[2]) throw new Error("Terminal alternative must be the final, unrepeated element");
+      atom = `(?:[${token.slice(1, -2)}]|$)`;
     }
-  }
-  return regexParts.join("");
+    if (match[2] != null) {
+      const min = Number(match[2]), max = Number(match[3] ?? match[2]);
+      if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || max < min || max > 1000000) throw new Error("Invalid PROSITE repetition range");
+      atom += match[3] == null ? `{${min}}` : `{${min},${max}}`;
+    }
+    return atom;
+  });
+  return (start ? "^" : "") + result.join("") + (terminal ? "$" : "");
 }
 
 /**
@@ -162,8 +165,9 @@ export function parseNumericValue(value) {
   if (!text) return null;
   const lower = text.toLowerCase();
   if (lower === "na" || lower === "nan" || lower === "#num!" || lower === "null") return null;
-  const num = parseFloat(text);
-  return isNaN(num) ? null : num;
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)) return null;
+  const num = Number(text);
+  return Number.isFinite(num) ? num : null;
 }
 
 /**
@@ -187,18 +191,27 @@ export function parseDatasetText(text, name, treeTips) {
   }
 
   const columns = header.slice(1);
-  const tipValues = {};
+  if (columns.some(column => !column.trim()) || new Set(columns).size !== columns.length) {
+    return { data: null, error: "Dataset value columns must have unique, nonempty names" };
+  }
+  const tipValues = Object.create(null);
   let matchedRowCount = 0;
   let unmatchedRowCount = 0;
   const matchedTipNames = [];
   let missingValueCount = 0;
-  const numericValues = [];
+  let minValue = null, maxValue = null;
+  let invalidValueCount = 0;
+  const invalidCells = [];
+  const seen = new Set();
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.length === 0) continue;
     const tipName = (row[0] || "").trim();
     if (!tipName) continue;
+    if (row.length > header.length) return { data: null, error: `Dataset row ${i + 1} has more values than the header` };
+    if (seen.has(tipName)) return { data: null, error: `Duplicate dataset identifier: ${tipName}` };
+    seen.add(tipName);
     const values = row.slice(1);
     if (!treeTips.has(tipName)) {
       unmatchedRowCount++;
@@ -206,22 +219,25 @@ export function parseDatasetText(text, name, treeTips) {
     }
     matchedRowCount++;
     matchedTipNames.push(tipName);
-    const rowValues = {};
+    const rowValues = Object.create(null);
     for (let idx = 0; idx < columns.length; idx++) {
       const rawValue = idx < values.length ? values[idx] : "";
       const numericValue = parseNumericValue(rawValue);
       if (numericValue === null) {
         missingValueCount++;
+        if (rawValue.trim() && !/^(na|nan|#num!|null)$/i.test(rawValue.trim())) {
+          invalidValueCount++;
+          if (invalidCells.length < 10) invalidCells.push({ row: i + 1, column: columns[idx], value: rawValue });
+        }
       } else {
-        numericValues.push(numericValue);
+        minValue = minValue == null ? numericValue : Math.min(minValue, numericValue);
+        maxValue = maxValue == null ? numericValue : Math.max(maxValue, numericValue);
       }
       rowValues[columns[idx]] = { raw: rawValue, value: numericValue };
     }
     tipValues[tipName] = rowValues;
   }
 
-  const minValue = numericValues.length > 0 ? Math.min(...numericValues) : null;
-  const maxValue = numericValues.length > 0 ? Math.max(...numericValues) : null;
 
   return {
     data: {
@@ -232,6 +248,8 @@ export function parseDatasetText(text, name, treeTips) {
       matched_row_count: matchedRowCount,
       unmatched_row_count: unmatchedRowCount,
       missing_value_count: missingValueCount,
+      invalid_value_count: invalidValueCount,
+      invalid_cells: invalidCells,
       min_value: minValue,
       max_value: maxValue,
     },

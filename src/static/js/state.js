@@ -2,6 +2,7 @@ function createInitialState() {
   return {
   // Data loading
   loaded: false,
+  validationIssues: [],
   gene: null,
   nwkName: null,
   aaName: null,
@@ -105,33 +106,6 @@ function createInitialState() {
 }
 
 export const state = createInitialState();
-
-export const dom = {
-  svg: document.getElementById("tree-svg"),
-  group: document.getElementById("tree-group"),
-  tooltip: document.getElementById("tooltip"),
-  setupOverlay: document.getElementById("setup-overlay"),
-  setupLoadBtn: document.getElementById("setup-load"),
-  setupError: document.getElementById("setup-error"),
-  folderPicker: document.getElementById("folder-picker"),
-  filePicker: document.getElementById("file-picker"),
-  detectedFilesPanel: document.getElementById("detected-files"),
-  detectedNwkSelect: document.getElementById("detected-nwk"),
-  detectedAaSelect: document.getElementById("detected-aa"),
-  detectedExperimentalList: document.getElementById("detected-experimental-list"),
-  detectedExperimentalHint: document.getElementById("detected-experimental-hint"),
-  detectedExperimentalControls: document.getElementById("detected-experimental-controls"),
-  detectedExperimentalSelectAllBtn: document.getElementById("detected-experimental-select-all"),
-  detectedExperimentalClearBtn: document.getElementById("detected-experimental-clear"),
-  detectedOrthoSpan: document.getElementById("detected-ortho"),
-  speciesSourceSelect: document.getElementById("species-source-select"),
-  speciesInferPanel: document.getElementById("species-infer-panel"),
-  speciesInferPattern: document.getElementById("species-infer-pattern"),
-  speciesInferReplacement: document.getElementById("species-infer-replacement"),
-  speciesSourceHint: document.getElementById("species-source-hint"),
-  detectedDatasetSpan: document.getElementById("detected-datasets"),
-  setupLoadRow: document.getElementById("setup-load-row"),
-};
 
 export const PALETTE = [
   "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",

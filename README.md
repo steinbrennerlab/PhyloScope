@@ -44,9 +44,11 @@ npm install    # one-time: installs esbuild
 npm run build  # bundles to docs/
 ```
 
-Requires Node.js 18+.
+Requires Node.js 22+ for the development build and test commands.
 
 Run the regression tests from `src/` with `npm test` (use `npm.cmd test` in Windows PowerShell). Tests cover Newick parsing/export, re-rooting invariants, imported-label escaping, and session isolation. The session tests use a DOM stand-in; they do not replace browser interaction testing.
+
+Additional regressions cover all 625 entries of the pinned NCBI BLOSUM62 matrix, PROSITE terminal patterns, import diagnostics, 200,000 heatmap cells, and a 10,000-level tree through all layouts and session serialization. GitHub Actions runs the JavaScript tests, independent reroot validator, and build on Node 22/24, then checks that `docs/` matches source.
 
 The pinned RLP, XI, and XII re-rooting fixtures are in `src/tests/fixtures/reroot_validation/`. Run `npm run test:reroot-validator` from `src/` to check the known-good outputs, require the known-buggy RLP output to fail, and validate freshly generated PhyloScope outputs with the supplied Python checker. This additional check requires Python with `ete3`; set `PHYLOSCOPE_PYTHON` to a Python executable if needed. It does not add a Python dependency to the app. See `src/tests/README.md` for details.
 
@@ -190,6 +192,7 @@ An example dataset is provided in `example_data/`.
 - Works across all three layout modes
 
 ### Pairwise Compare
+- Identity is case-insensitive. Similarity counts columns with a strictly positive [NCBI BLOSUM62 score](https://raw.githubusercontent.com/ncbi/ncbi-cxx-toolkit-public/master/src/util/tables/sm_blosum62.c). Both percentages exclude columns with a `-` gap in either sequence. X/X has a negative matrix score, so it counts toward identity but not similarity; symbols absent from the matrix are not positive.
 - Select two tips (with autocomplete) and click **Compare** to see:
   - **Patristic distance**: sum of branch lengths from each tip to their LCA
   - **Sequence identity**: percentage of identical positions at ungapped alignment columns (requires alignment)
@@ -201,6 +204,8 @@ An example dataset is provided in `example_data/`.
 - Multiple dataset files can be loaded at the same time
 - Each loaded dataset keeps its own independent color scale computed across all numeric values in that dataset file
 - Missing or non-numeric values such as `na` and `#NUM!` display as neutral gray cells
+- Numeric cells must be complete finite decimal numbers (scientific notation is accepted); `12oops` is reported as malformed and treated as missing.
+- The loaded-data panel includes an **Import validation** report for unequal FASTA lengths, missing/unmatched identifiers, dataset errors, and malformed numeric cells. Duplicate FASTA or tree identifiers stop loading; duplicate dataset rows/columns cannot be activated. Unequal FASTA lengths are allowed for motif work, but pairwise comparisons require equal lengths.
 - **Color picker**: customize low, mid, and high colors for the heatmap gradient, with reset to defaults
 - **Threshold sliders**: adjust min, mid, and max thresholds to control the color scale mapping, with reset
 - Hover over any heatmap cell to see tip name, dataset name, column name, and exact raw value
@@ -228,6 +233,7 @@ An example dataset is provided in `example_data/`.
 - **Click** an internal node to select it, then:
   - **Download .nwk**: save the subtree as a Newick file
   - **Copy to clipboard**: copy the Newick string directly
+- Unchanged branch lengths preserve their input spelling, including trailing zeros and explicit zero lengths, through rerooting and session save/load. Split or combined lengths use JavaScript's shortest round-trip numeric representation without forced decimal rounding. Downloads and clipboard text end with a newline.
 
 ### Session Save / Load
 - **Save session**: downloads a self-contained JSON file with all source data (tree, alignment, species files, datasets, and selected experimental JSON files) and full UI state — collapsed nodes, clade labels, species selections, motif searches, tip filters, layout settings, zoom/pan, rerooted tree state
@@ -279,7 +285,13 @@ src/
       file-loader.js  # File picker handling and data loading
       parsers.js      # Newick, FASTA, PROSITE, and dataset parsers
       renderer.js     # Tree layout/rendering and export SVG helpers
-      state.js        # Shared frontend state and DOM references
+      state.js        # Shared frontend state (no DOM access)
+      dom.js          # DOM references used by UI code
+      tree-layout.js  # Pure iterative layout coordinates
+      tree-traversal.js # Stack-safe traversal and copying
+      history.js      # Undo/redo model snapshots
+      json-export.js  # Stack-safe session serialization
+      blosum62.js     # NCBI residue substitution scores
       tree-ops.js     # Tree mutation, species mapping, and export helpers
       tree-utils.js   # Tree traversal, indexing, and distance helpers
 example_data/         # Example tree, alignment, and species data

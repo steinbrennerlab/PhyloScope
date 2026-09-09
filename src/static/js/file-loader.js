@@ -1,9 +1,10 @@
+import { collectAllTipNames } from "./tree-traversal.js";
 /**
  * File loading infrastructure for PhyloScope standalone mode.
  * Handles folder/file picker input, detects file types, builds workspace.
  */
 
-import { parseNewick, parseFastaText } from "./parsers.js";
+import { parseDatasetText, parseNewick, parseFastaText } from "./parsers.js";
 import {
   annotateSpecies,
   buildSpeciesMapFromFiles,
@@ -152,78 +153,14 @@ export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles,
     (datasetFiles || []).map(async f => ({ name: f.name, text: await f.text() }))
   );
 
-  const treeData = parseNewick(nwkText);
-  const gene = nwkFile.name.replace(/\.nwk$/, "");
-  const resolvedSpeciesConfig = normalizeSpeciesConfig(speciesConfig);
-  let experimentalAnalysis = null;
-  if (experimentalSources.length > 0) {
-    try {
-      experimentalAnalysis = parseExperimentalAnalysisSources(experimentalSources);
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  }
-
-  let proteinSeqs = null;
-  let proteinSeqsUngapped = null;
-  if (aaText) {
-    proteinSeqs = parseFastaText(aaText);
-    proteinSeqsUngapped = {};
-    for (const [k, v] of Object.entries(proteinSeqs)) {
-      proteinSeqsUngapped[k] = v.replace(/-/g, "");
-    }
-  }
-
-  let speciesToTips = {};
-  let tipToSpecies = {};
   try {
-    const mapping = resolveSpeciesMapping(treeData, orthoTexts, resolvedSpeciesConfig);
-    speciesToTips = mapping.speciesToTips;
-    tipToSpecies = mapping.tipToSpecies;
+    return { success: true, result: loadFromSourceTexts({
+      nwk: nwkText, nwkName: nwkFile.name, aa: aaText, aaName: aaFile?.name || null,
+      speciesConfig, ortho: orthoTexts, datasets: datasetTexts, experimental: experimentalSources,
+    }) };
   } catch (error) {
     return { success: false, error: error.message };
   }
-  if (Object.keys(tipToSpecies).length > 0) {
-    annotateSpecies(treeData, tipToSpecies);
-  }
-
-  const hasFasta = proteinSeqs !== null;
-  const tipLengths = {};
-  if (proteinSeqsUngapped) {
-    for (const [k, v] of Object.entries(proteinSeqsUngapped)) {
-      tipLengths[k] = v.length;
-    }
-  }
-
-  return {
-    success: true,
-    result: {
-      treeData,
-      gene,
-      nwkName: nwkFile.name,
-      aaName: aaFile ? aaFile.name : null,
-      hasFasta,
-      numSeqs: hasFasta ? Object.keys(proteinSeqs).length : 0,
-      numSpecies: Object.keys(speciesToTips).length,
-      proteinSeqs,
-      proteinSeqsUngapped,
-      speciesToTips,
-      tipToSpecies,
-      tipLengths,
-      datasetFileNames: datasetTexts.map(d => d.name).sort(),
-      experimentalAnalysis,
-      sourceTexts: {
-        nwk: nwkText,
-        nwkName: nwkFile.name,
-        aa: aaText,
-        aaName: aaFile ? aaFile.name : null,
-        speciesConfig: resolvedSpeciesConfig,
-        ortho: orthoTexts,
-        datasets: datasetTexts,
-        experimental: experimentalSources.length > 0 ? experimentalSources : null,
-      },
-    },
-  };
 }
 
 /**
@@ -246,9 +183,9 @@ export function loadFromSourceTexts(sourceTexts) {
 
   let proteinSeqs = null;
   let proteinSeqsUngapped = null;
-  if (aaText) {
+  if (aaText != null) {
     proteinSeqs = parseFastaText(aaText);
-    proteinSeqsUngapped = {};
+    proteinSeqsUngapped = Object.create(null);
     for (const [k, v] of Object.entries(proteinSeqs)) {
       proteinSeqsUngapped[k] = v.replace(/-/g, "");
     }
@@ -264,14 +201,36 @@ export function loadFromSourceTexts(sourceTexts) {
   }
 
   const hasFasta = proteinSeqs !== null;
-  const tipLengths = {};
+  const tipLengths = Object.create(null);
   if (proteinSeqsUngapped) {
     for (const [k, v] of Object.entries(proteinSeqsUngapped)) {
       tipLengths[k] = v.length;
     }
   }
 
+  const tips = collectAllTipNames(treeData);
+  const treeTips = new Set(tips);
+  if (tips.length !== treeTips.size) throw new Error("Duplicate tree tip identifiers are ambiguous; use unique tip labels");
+  const validationIssues = [];
+  if (proteinSeqs) {
+    const lengths = new Set(Object.values(proteinSeqs).map(seq => seq.length));
+    if (lengths.size > 1) validationIssues.push("FASTA sequences have unequal lengths; pairwise comparison requires equal alignment lengths.");
+    const missing = tips.filter(tip => !Object.hasOwn(proteinSeqs, tip));
+    const extra = Object.keys(proteinSeqs).filter(tip => !treeTips.has(tip));
+    if (missing.length) validationIssues.push(`${missing.length} tree tips lack FASTA sequences (examples: ${missing.slice(0, 5).join(", ")}).`);
+    if (extra.length) validationIssues.push(`${extra.length} FASTA identifiers do not match tree tips (examples: ${extra.slice(0, 5).join(", ")}).`);
+  }
+  const datasetNames = new Set();
+  for (const dataset of datasetTexts) {
+    if (datasetNames.has(dataset.name)) throw new Error(`Duplicate dataset filename: ${dataset.name}`);
+    datasetNames.add(dataset.name);
+    const { data, error } = parseDatasetText(dataset.text, dataset.name, treeTips);
+    if (error) { validationIssues.push(`${dataset.name}: ${error}`); continue; }
+    if (data.unmatched_row_count) validationIssues.push(`${dataset.name}: ${data.unmatched_row_count} rows do not match tree tips and are ignored.`);
+    if (data.invalid_value_count) validationIssues.push(`${dataset.name}: ${data.invalid_value_count} malformed numeric cells treated as missing. Examples: ${data.invalid_cells.map(cell => `row ${cell.row}, ${cell.column}: ${cell.value}`).join("; ")}`);
+  }
   return {
+    validationIssues,
     treeData,
     gene,
     nwkName: sourceTexts.nwkName || "tree.nwk",

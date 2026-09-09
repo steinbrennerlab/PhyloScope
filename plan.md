@@ -17,25 +17,25 @@ Validation completed:
 - The known-buggy RLP output still fails **4/8, exit 1**, at checks 4, 6, 7, and 8. Its topology and branch-length checks still pass, as required for this negative control.
 - All three newly generated PhyloScope outputs pass **8/8, exit 0**, preserving every bipartition's support and length and the requested outgroup.
 - **19 JavaScript tests pass**, including the same bipartition checks after export/reparse, session load, and UI-action undo/redo; repeated tip/clade re-rooting; missing support; and explicit rejection of conflicting root-edge supports.
-- Reproduce the independent check with `npm run test:reroot-validator` in `src/` (Python with ete3 required). No Python dependency was added to the browser app. Numeric root halves are unrounded; preserving six-decimal source formatting remains E1 below.
+- Reproduce the independent check with `npm run test:reroot-validator` in `src/` (Python with ete3 required). No Python dependency was added to the browser app. Numeric root halves are unrounded; unchanged source formatting is now preserved (E1 below).
 
 ### Medium: scientific calculations and large inputs
 
-- [ ] **M1 — Pairwise identity/similarity.** Normalize residue case before identity comparison and replace the incorrect hardcoded positive-score BLOSUM62 pair list with a verified matrix/scoring rule. `ac` versus `AC` currently reports 0% identity; A/G is incorrectly positive and Q/R is missed.
-- [ ] **M2 — PROSITE terminal anchors.** Recognize leading `<` and trailing `>` independently of hyphen-separated tokens. Add terminal-pattern fixtures from the PROSITE manual.
-- [ ] **M3 — Large heatmaps and deep-tree operations.** Replace `Math.min(...numericValues)` / `Math.max(...numericValues)` with incremental extrema; a 10,000-tip by 20-column heatmap currently throws a RangeError. The parser now uses iterative frames, but other recursive tree operations still need deep-tree coverage and repair where necessary.
+- [x] **M1: Pairwise identity/similarity.** Case is normalized for identity. Similarity uses strictly positive scores from the full public-domain NCBI BLOSUM62 matrix. All 625 entries are tested against the pinned original source, including A/G = 0 and Q/R = 1.
+- [x] **M2: PROSITE terminal anchors.** Attached and separate terminal anchors, repeats, classes/exclusions, and final `[G>]` alternatives are supported. Manual examples and malformed-pattern regressions pass.
+- [x] **M3: Large heatmaps and deep-tree operations.** Extrema accumulate without argument spreading. Traversal, copying, annotations, lookup, normal/fast layout rendering, experimental split extraction, auto-collapse, Newick and session JSON export avoid recursion. Tests cover 200,000 cells and a 10,000-level tree across all three layouts.
 
 ### Low / cosmetic: export fidelity
 
-- [ ] **E1 — Preserve branch-length formatting where unchanged.** Keep source numeric tokens for unchanged lengths, including RAxML trailing zeros (`0.434680`). Define formatting for genuinely changed lengths after splitting or combining edges. The report identifies 53 of 579 reformatted lengths; that exact count is not independently verified here.
-- [ ] **E2 — End exported Newick files with a newline.** Current download output ends at the semicolon.
+- [x] **E1: Preserve branch-length formatting where unchanged.** Source numeric tokens travel with edges and survive copying and validated sessions. All three pinned families retain every unchanged edge token. Changed split/combined lengths use shortest round-trip numeric spelling without forced rounding.
+- [x] **E2: End exported Newick files with a newline.** Both download and clipboard actions use the same serializer ending in `;\n`; the independent validator runner uses it too.
 
 ### Follow-up improvements and verification
 
-- [ ] **Q1 — Import validation report.** Flag duplicate FASTA identifiers, unequal alignment lengths, unmatched tips, and malformed numeric cells. Duplicate IDs currently overwrite sequences, and `12oops` is accepted as 12.
-- [ ] **Q2 — Expand regression coverage and add CI.** The suite now has 19 passing tests, including support/bipartition preservation and positive/negative fixtures. Add regressions for the remaining fixes, then automate the tests, independent validator, and build checks in CI.
-- [ ] **Q3 — Browser verification.** Exercise loading, re-rooting, undo/redo, all layouts, exports, and session replacement in a real browser. No browser was connected during the first fix pass; DOM stand-in tests are not browser interaction tests.
-- [ ] **Q4 — Separate domain state from DOM/UI code.** Continue extracting session/history and scientific operations from the large `actions.js` module; importing tree utilities still indirectly accesses `document`.
+- [x] **Q1: Import validation report.** The loaded-data panel reports unequal alignment lengths, unmatched/missing tips, dataset errors, and malformed numeric cells with examples. Duplicate FASTA/tree IDs reject loading; duplicate dataset identifiers/columns cannot activate. Numeric parsing requires complete finite decimals. Files and sessions share one workspace builder.
+- [x] **Q2: Expand regression coverage and add CI.** 29 JavaScript tests pass, along with all positive/generated Python checks (8/8) and the required buggy negative control (4/8, exit 1). GitHub Actions runs tests, the independent validator, and distribution freshness checks on Node 22/24. Remote CI execution awaits push.
+- [ ] **Q3: Browser verification — blocked by environment.** Rechecked this pass: the browser runtime returns no available browser (`[]`). Loading, rerooting, undo/redo, layouts, exports, and session replacement still need real browser interaction tests; the manual checklist is in `src/tests/README.md`.
+- [x] **Q4: Separate domain state from DOM/UI code.** DOM references moved to `dom.js`; pure traversal, layout, BLOSUM62 scoring, history transitions, and JSON export have dedicated modules. The file/session workspace builder is shared. Domain modules are tested without `document`.
 
 ## Implemented in the first pass
 

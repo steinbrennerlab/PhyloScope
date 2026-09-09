@@ -1,6 +1,10 @@
+import { captureState, restoreHistoryState } from "./history.js";
+import { stringifySession } from "./json-export.js";
+import { dom } from "./dom.js";
+import { walkTree } from "./tree-traversal.js";
 import { escapeHtml } from "./html-utils.js";
 import { validateSession } from "./session.js";
-import { dom, MOTIF_PALETTE, PALETTE, resetClientState, state } from "./state.js";
+import { MOTIF_PALETTE, PALETTE, resetClientState, state } from "./state.js";
 import {
   collectAllTipNames,
   countAllTips,
@@ -29,7 +33,7 @@ import {
   DEFAULT_SPECIES_INFER_PATTERN,
   DEFAULT_SPECIES_INFER_REPLACEMENT,
   findNodesWithSpecies,
-  nodeToNewick,
+  exportNewickText,
   refPosToColumns,
   rerootTree,
 } from "./tree-ops.js";
@@ -229,28 +233,24 @@ function mergeSortedLeafNames(left, right) {
 function buildExperimentalNodeIndex(root) {
   const signatureToNodes = new Map();
 
-  function walk(node) {
-    let leaves;
-    if (!node.ch || node.ch.length === 0) {
-      leaves = [node.name];
-    } else {
-      leaves = [];
-      node.ch.forEach(child => {
-        leaves = mergeSortedLeafNames(leaves, walk(child));
-      });
+  const leavesById = new Map();
+  const order = [...walkTree(root)];
+  const sizes = new Set((state.experimentalAnalysis?.clades || []).map(clade => clade.leaves.length));
+  for (let i = order.length - 1; i >= 0; i--) {
+    const node = order[i];
+    let leaves = node.ch?.length ? [] : [node.name];
+    for (const child of node.ch || []) {
+      leaves = mergeSortedLeafNames(leaves, leavesById.get(child.id));
+      leavesById.delete(child.id);
     }
+    leavesById.set(node.id, leaves);
+    if (sizes.size && !sizes.has(leaves.length)) continue;
     const signature = buildCladeSignature(leaves);
     const nodes = signatureToNodes.get(signature) || [];
-    nodes.push({
-      nodeId: node.id,
-      tipCount: leaves.length,
-      support: node.sup ?? null,
-    });
+    nodes.push({ nodeId: node.id, tipCount: leaves.length, support: node.sup ?? null });
     signatureToNodes.set(signature, nodes);
-    return leaves;
   }
 
-  walk(root);
   return signatureToNodes;
 }
 
@@ -1499,6 +1499,8 @@ function showLoadedInfo(totalTips) {
       ? `<span class="loaded-label">Experimental:</span> <span class="loaded-value">${escapeHtml(experimentalSummary)}</span>`
       : `<span class="loaded-label">Experimental:</span> <span class="loaded-none">none</span>`
   );
+  const issues = state.validationIssues || [];
+  lines.push(`<details><summary>Import validation: ${issues.length ? `${issues.length} issue(s)` : "no issues found"}</summary>${issues.map(escapeHtml).join("<br>")}</details>`);
   el.innerHTML = lines.join("<br>");
 }
 
@@ -1506,72 +1508,8 @@ function showLoadedInfo(totalTips) {
 // Undo / redo (unchanged)
 // ---------------------------------------------------------------------------
 
-function captureState() {
-  return {
-    // Tree operations replace topology objects, so view-state snapshots can
-    // share them instead of cloning every node on each control interaction.
-    treeData: state.treeData,
-    treeRerooted: state.treeRerooted,
-    collapsedNodes: new Set(state.collapsedNodes),
-    exportNodeId: state.exportNodeId,
-    selectedTip: state.selectedTip,
-    speciesColors: { ...state.speciesColors },
-    fullTreeData: state.fullTreeData,
-    scale: state.scale,
-    tx: state.tx,
-    ty: state.ty,
-    hiddenTips: new Set(state.hiddenTips),
-    nodeLabels: { ...state.nodeLabels },
-    nodeLabelIcons: { ...state.nodeLabelIcons },
-    nodeLabelColors: { ...state.nodeLabelColors },
-    cladeColors: { ...state.cladeColors },
-    tipMarkers: JSON.parse(JSON.stringify(state.tipMarkers)),
-    labelFontSize: state.labelFontSize,
-    layoutMode: state.layoutMode,
-    usePhylogram: state.usePhylogram,
-    showTipLabels: state.showTipLabels,
-    tipLabelSize: state.tipLabelSize,
-    dotSize: state.dotSize,
-    showBootstraps: state.showBootstraps,
-    showLengths: state.showLengths,
-    tipSpacing: state.tipSpacing,
-    triangleScale: state.triangleScale,
-    uniformTriangles: state.uniformTriangles,
-    fastMode: state.fastMode,
-  };
-}
-
 function restoreState(snapshot) {
-  state.treeData = snapshot.treeData;
-  state.treeRerooted = snapshot.treeRerooted ?? false;
-  state.collapsedNodes = snapshot.collapsedNodes;
-  state.exportNodeId = snapshot.exportNodeId;
-  state.selectedTip = snapshot.selectedTip;
-  state.selectedNameTips = new Set();
-  state.speciesColors = snapshot.speciesColors || state.speciesColors;
-  state.fullTreeData = snapshot.fullTreeData;
-  state.scale = snapshot.scale;
-  state.tx = snapshot.tx;
-  state.ty = snapshot.ty;
-  state.hiddenTips = snapshot.hiddenTips;
-  state.nodeLabels = snapshot.nodeLabels;
-  state.nodeLabelIcons = snapshot.nodeLabelIcons || {};
-  state.nodeLabelColors = snapshot.nodeLabelColors || {};
-  state.cladeColors = snapshot.cladeColors || {};
-  state.tipMarkers = snapshot.tipMarkers || {};
-  // Restore display settings (use fallback defaults for older snapshots)
-  state.labelFontSize = snapshot.labelFontSize ?? state.labelFontSize;
-  state.layoutMode = snapshot.layoutMode ?? state.layoutMode;
-  state.usePhylogram = snapshot.usePhylogram ?? state.usePhylogram;
-  state.showTipLabels = snapshot.showTipLabels ?? state.showTipLabels;
-  state.tipLabelSize = snapshot.tipLabelSize ?? state.tipLabelSize;
-  state.dotSize = snapshot.dotSize ?? state.dotSize;
-  state.showBootstraps = snapshot.showBootstraps ?? state.showBootstraps;
-  state.showLengths = snapshot.showLengths ?? state.showLengths;
-  state.tipSpacing = snapshot.tipSpacing ?? state.tipSpacing;
-  state.triangleScale = snapshot.triangleScale ?? state.triangleScale;
-  state.uniformTriangles = snapshot.uniformTriangles ?? state.uniformTriangles;
-  state.fastMode = snapshot.fastMode ?? state.fastMode;
+  restoreHistoryState(state, snapshot);
   reindexTree(state.treeData);
   updateSubtreeModeUi();
   refreshExperimentalHighlightsAndInfo();
@@ -1604,7 +1542,7 @@ function restoreState(snapshot) {
 }
 
 function pushUndo() {
-  state.undoStack.push(captureState());
+  state.undoStack.push(captureState(state));
   if (state.undoStack.length > 20) state.undoStack.shift();
   state.redoStack = [];
   updateUndoRedoButtons();
@@ -1612,13 +1550,13 @@ function pushUndo() {
 
 function undo() {
   if (state.undoStack.length === 0) return;
-  state.redoStack.push(captureState());
+  state.redoStack.push(captureState(state));
   restoreState(state.undoStack.pop());
 }
 
 function redo() {
   if (state.redoStack.length === 0) return;
-  state.undoStack.push(captureState());
+  state.undoStack.push(captureState(state));
   restoreState(state.redoStack.pop());
 }
 
@@ -2425,7 +2363,7 @@ function saveSession() {
     })),
   };
 
-  triggerDownload(new Blob([JSON.stringify(session, null, 2)], { type: "application/json" }), "phyloscope-session.json");
+  triggerDownload(new Blob([stringifySession(session)], { type: "application/json" }), "phyloscope-session.json");
 }
 
 function loadSession(fromSetup = false) {
@@ -2477,6 +2415,7 @@ async function loadSessionV2(session, fromSetup) {
 
   // Populate state with workspace data
   state.loaded = true;
+  state.validationIssues = workspace.validationIssues;
   state.gene = session.gene || workspace.gene;
   state.nwkName = session.nwkName || workspace.nwkName;
   state.aaName = session.aaName || workspace.aaName;
@@ -2720,7 +2659,7 @@ function exportNewick() {
   if (state.exportNodeId == null) return;
   const node = state.nodeById[state.exportNodeId];
   if (!node) return;
-  const nwk = nodeToNewick(node) + ";";
+  const nwk = exportNewickText(node);
   triggerDownload(
     new Blob([nwk], { type: "text/plain" }),
     `node${state.exportNodeId}.nwk`
@@ -2735,7 +2674,7 @@ async function copyNewick() {
   const resultEl = document.getElementById("newick-result");
   const node = state.nodeById[state.exportNodeId];
   if (!node) return;
-  const nwk = nodeToNewick(node) + ";";
+  const nwk = exportNewickText(node);
   try {
     await navigator.clipboard.writeText(nwk);
     resultEl.style.color = "#27ae60";
@@ -3071,6 +3010,7 @@ async function doSetupLoad() {
 
 function applyLoadResult(result) {
   state.loaded = true;
+  state.validationIssues = result.validationIssues;
   state.gene = result.gene;
   state.nwkName = result.nwkName;
   state.aaName = result.aaName;
@@ -3143,16 +3083,14 @@ function initAfterLoad() {
   if (totalTips > 2000 && state.fastMode && state.treeData.ch) {
     const targetLeaves = 50;
     const collapseThreshold = Math.max(20, Math.floor(totalTips / targetLeaves));
-    const autoCollapse = node => {
-      if (!node.ch || node.ch.length === 0) return;
+    const pending = [...state.treeData.ch];
+    while (pending.length) {
+      const node = pending.pop();
+      if (!node.ch?.length) continue;
       const tips = countAllTips(node);
-      if (tips <= collapseThreshold && tips > 1) {
-        state.collapsedNodes.add(node.id);
-        return;
-      }
-      node.ch.forEach(autoCollapse);
-    };
-    state.treeData.ch.forEach(autoCollapse);
+      if (tips <= collapseThreshold && tips > 1) state.collapsedNodes.add(node.id);
+      else for (const child of node.ch) pending.push(child);
+    }
   }
 
   updateTriangleControls();

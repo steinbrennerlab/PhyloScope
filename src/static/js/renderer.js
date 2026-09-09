@@ -1,5 +1,8 @@
+import { layoutTree } from "./tree-layout.js";
+import { dom } from "./dom.js";
+import { walkTree } from "./tree-traversal.js";
 import { escapeHtml } from "./html-utils.js";
-import { dom, getInlineStyles, state } from "./state.js";
+import { getInlineStyles, state } from "./state.js";
 import {
   collectAllTipNames,
   countAllTips,
@@ -286,37 +289,10 @@ function scheduleViewportRefresh() {
 }
 
 function renderRectangular(fragments, checkedSpecies, layoutMetadata) {
-  let leafIndex = 0;
-  const xScale = state.usePhylogram ? 800 : 0;
   const heatmapRows = [];
   let heatmapAnchorX = 0;
 
-  function layout(node, depth) {
-    if ((layoutMetadata.visibleTipCounts.get(node.id) || 0) === 0) return null;
-    const bl = node.bl || 0;
-    const x = state.usePhylogram ? depth + bl * xScale : depth + 20;
-
-    if (state.collapsedNodes.has(node.id) && node.ch) {
-      const tipCount = countAllTips(node);
-      const triH = (state.uniformTriangles ? 30 : Math.min(tipCount * 2, 40)) * state.triangleScale / 100;
-      const slotsNeeded = Math.max(1, Math.ceil(triH / state.tipSpacing));
-      const y = (leafIndex + slotsNeeded / 2) * state.tipSpacing;
-      leafIndex += slotsNeeded;
-      return { ...node, x, parentX: depth, y, collapsed: true, tipCount };
-    }
-    if (!node.ch || node.ch.length === 0) {
-      if (state.hiddenTips.has(node.name)) return null;
-      const y = leafIndex * state.tipSpacing;
-      leafIndex++;
-      return { ...node, x, parentX: depth, y };
-    }
-    const children = node.ch.map(child => layout(child, x)).filter(Boolean);
-    if (children.length === 0) return null;
-    const y = (children[0].y + children[children.length - 1].y) / 2;
-    return { ...node, x, parentX: depth, y, layoutChildren: children };
-  }
-
-  const root = layout(state.treeData, 0);
+  const root = layoutTree(state.treeData, state, layoutMetadata, state.subtreeTipCount);
   if (!root) return;
   recordLayoutPositions(root, node => ({ x: node.x, y: node.y }));
   if (state.fastMode && state.activeHeatmaps.length === 0) {
@@ -341,7 +317,7 @@ function renderRectangular(fragments, checkedSpecies, layoutMetadata) {
       const lastY = node.layoutChildren[node.layoutChildren.length - 1].y;
       fragments.push(`<line x1="${nx}" y1="${firstY}" x2="${nx}" y2="${lastY}" stroke="${escapeHtml(resolveConnectorColor(node))}" stroke-width="1"/>`);
       drawNodeDot(fragments, nx, ny, node);
-      node.layoutChildren.forEach(draw);
+
     } else {
       drawTipDot(fragments, nx, ny, node, checkedSpecies);
       const d = state.dotSize;
@@ -353,42 +329,14 @@ function renderRectangular(fragments, checkedSpecies, layoutMetadata) {
     }
   }
 
-  draw(root);
+  for (const node of walkTree(root, "layoutChildren")) draw(node);
   drawRectangularHeatmap(fragments, heatmapRows, heatmapAnchorX + 12);
 }
 
 function renderCircular(fragments, checkedSpecies, layoutMetadata) {
-  const totalLeaves = layoutMetadata.layoutLeafCounts.get(state.treeData.id) || 0;
-  const spacingFactor = state.tipSpacing / 16;
-  const rScale = state.usePhylogram ? 300 * spacingFactor : 0;
-  const rStep = state.usePhylogram ? 0 : 15 * spacingFactor;
-  let leafIndex = 0;
   const heatmapTips = [];
 
-  function layout(node, depth) {
-    if ((layoutMetadata.visibleTipCounts.get(node.id) || 0) === 0) return null;
-    const bl = node.bl || 0;
-    const r = state.usePhylogram ? depth + bl * rScale : depth + rStep;
-
-    if (state.collapsedNodes.has(node.id) && node.ch) {
-      const angle = (leafIndex / totalLeaves) * 2 * Math.PI;
-      leafIndex++;
-      const tipCount = countAllTips(node);
-      return { ...node, r, parentR: depth, angle, collapsed: true, tipCount };
-    }
-    if (!node.ch || node.ch.length === 0) {
-      if (state.hiddenTips.has(node.name)) return null;
-      const angle = (leafIndex / totalLeaves) * 2 * Math.PI;
-      leafIndex++;
-      return { ...node, r, parentR: depth, angle };
-    }
-    const children = node.ch.map(child => layout(child, r)).filter(Boolean);
-    if (children.length === 0) return null;
-    const angle = (children[0].angle + children[children.length - 1].angle) / 2;
-    return { ...node, r, parentR: depth, angle, layoutChildren: children };
-  }
-
-  const root = layout(state.treeData, 0);
+  const root = layoutTree(state.treeData, state, layoutMetadata, state.subtreeTipCount);
   if (!root) return;
 
   function toXY(r, angle) {
@@ -424,7 +372,7 @@ function renderCircular(fragments, checkedSpecies, layoutMetadata) {
       const large = sweep > Math.PI ? 1 : 0;
       fragments.push(`<path d="M${ax1},${ay1} A${node.r},${node.r} 0 ${large},1 ${ax2},${ay2}" fill="none" stroke="${escapeHtml(resolveConnectorColor(node))}" stroke-width="1"/>`);
       drawNodeDot(fragments, nx, ny, node);
-      node.layoutChildren.forEach(draw);
+
     } else {
       const d = state.dotSize;
       const deg = node.angle * 180 / Math.PI;
@@ -444,50 +392,13 @@ function renderCircular(fragments, checkedSpecies, layoutMetadata) {
     }
   }
 
-  draw(root);
+  for (const node of walkTree(root, "layoutChildren")) draw(node);
   drawCircularHeatmap(fragments, heatmapTips);
 }
 
 function renderUnrooted(fragments, checkedSpecies, layoutMetadata) {
-  const spacingFactor = state.tipSpacing / 16;
-  const blScale = state.usePhylogram ? 300 * spacingFactor : 0;
-  const blStep = state.usePhylogram ? 0 : 20 * spacingFactor;
 
-  function layout(node, px, py, startAngle, wedge) {
-    if ((layoutMetadata.visibleTipCounts.get(node.id) || 0) === 0) return null;
-    const bl = node.bl || 0;
-    const len = state.usePhylogram ? bl * blScale : blStep;
-    const midAngle = startAngle + wedge / 2;
-    const nx = px + len * Math.cos(midAngle);
-    const ny = py + len * Math.sin(midAngle);
-
-    if (state.collapsedNodes.has(node.id) && node.ch) {
-      const tipCount = countAllTips(node);
-      return { ...node, x: nx, y: ny, parentX: px, parentY: py, angle: midAngle, collapsed: true, tipCount };
-    }
-    if (!node.ch || node.ch.length === 0) {
-      if (state.hiddenTips.has(node.name)) return null;
-      return { ...node, x: nx, y: ny, parentX: px, parentY: py, angle: midAngle };
-    }
-
-    const childLeafCounts = node.ch.map(child => layoutMetadata.layoutLeafCounts.get(child.id) || 0);
-    const totalChildLeaves = childLeafCounts.reduce((sum, count) => sum + count, 0);
-    if (totalChildLeaves === 0) return null;
-    let curAngle = startAngle;
-    const children = [];
-    node.ch.forEach((child, index) => {
-      if (childLeafCounts[index] === 0) return;
-      const childWedge = childLeafCounts[index] / totalChildLeaves * wedge;
-      const result = layout(child, nx, ny, curAngle, childWedge);
-      curAngle += childWedge;
-      if (result) children.push(result);
-    });
-    if (children.length === 0) return null;
-
-    return { ...node, x: nx, y: ny, parentX: px, parentY: py, angle: midAngle, layoutChildren: children };
-  }
-
-  const root = layout(state.treeData, 0, 0, 0, 2 * Math.PI);
+  const root = layoutTree(state.treeData, state, layoutMetadata, state.subtreeTipCount);
   if (!root) return;
   recordLayoutPositions(root, node => ({ x: node.x, y: node.y }));
   if (state.fastMode) {
@@ -505,7 +416,7 @@ function renderUnrooted(fragments, checkedSpecies, layoutMetadata) {
     }
     if (node.layoutChildren) {
       drawNodeDot(fragments, node.x, node.y, node);
-      node.layoutChildren.forEach(draw);
+
     } else {
       const gap = state.dotSize + 1;
       const deg = node.angle * 180 / Math.PI;
@@ -519,7 +430,7 @@ function renderUnrooted(fragments, checkedSpecies, layoutMetadata) {
     }
   }
 
-  draw(root);
+  for (const node of walkTree(root, "layoutChildren")) draw(node);
 }
 
 const EMOJI_MAP = {
@@ -954,7 +865,7 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
         sup: node.sup,
         isTip: false,
       });
-      node.layoutChildren.forEach(collect);
+
     } else {
       const d = state.dotSize;
       const { fill, r } = getFastTipDotStyle(node, checkedSpecies);
@@ -963,7 +874,7 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
     }
   }
 
-  collect(root);
+  for (const node of walkTree(root, "layoutChildren")) collect(node);
   emitPathsByColor(fragments, branchPaths);
   emitPathsByColor(fragments, vlinePaths);
   emitFastTrianglesAndDots(fragments, triangles, dotData);
@@ -1009,7 +920,7 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
         sup: node.sup,
         isTip: false,
       });
-      node.layoutChildren.forEach(collect);
+
     } else {
       const d = state.dotSize;
       const { fill, r } = getFastTipDotStyle(node, checkedSpecies);
@@ -1027,7 +938,7 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
     }
   }
 
-  collect(root);
+  for (const node of walkTree(root, "layoutChildren")) collect(node);
   emitPathsByColor(fragments, branchPaths);
   emitPathsByColor(fragments, arcPaths);
   emitFastTrianglesAndDots(fragments, triangles, dotData);
@@ -1060,7 +971,7 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
         sup: node.sup,
         isTip: false,
       });
-      node.layoutChildren.forEach(collect);
+
     } else {
       const d = state.dotSize;
       const { fill, r } = getFastTipDotStyle(node, checkedSpecies);
@@ -1078,7 +989,7 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
     }
   }
 
-  collect(root);
+  for (const node of walkTree(root, "layoutChildren")) collect(node);
   emitPathsByColor(fragments, branchPaths);
   emitFastTrianglesAndDots(fragments, triangles, dotData);
   tipLabels.forEach(label => queueTipLabelRadial(label.x, label.y, label.angle, label.anchor, label.node, checkedSpecies));
@@ -1258,7 +1169,7 @@ function drawCircularHeatmap(fragments, heatmapTips) {
   const columnGap = 3;
   const datasetGap = 10;
   let datasetOffset = 18;
-  const maxLabelRadius = Math.max(...heatmapTips.map(tip => tip.labelRadius), 0);
+  const maxLabelRadius = heatmapTips.reduce((max, tip) => Math.max(max, tip.labelRadius), 0);
 
   state.activeHeatmaps.forEach(heatmap => {
     const columns = getHeatmapColumns(heatmap);

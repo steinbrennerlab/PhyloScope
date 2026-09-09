@@ -1,3 +1,5 @@
+import { walkTree } from "./tree-traversal.js";
+export { collectAllTipNames, deepCopyNode } from "./tree-traversal.js";
 import { state } from "./state.js";
 
 export function getMotifColors(tipName) {
@@ -5,39 +7,28 @@ export function getMotifColors(tipName) {
 }
 
 export function isNodeHidden(node) {
-  if (!node.ch || node.ch.length === 0) return state.hiddenTips.has(node.name);
-  return node.ch.every(child => isNodeHidden(child));
+  for (const current of walkTree(node)) if (!current.ch?.length && !state.hiddenTips.has(current.name)) return false;
+  return true;
 }
 
 export function countLeaves(node) {
-  if (isNodeHidden(node)) return 0;
-  if (state.collapsedNodes.has(node.id) && node.ch) return 1;
-  if (!node.ch || node.ch.length === 0) return 1;
-  let total = 0;
-  for (const child of node.ch) total += countLeaves(child);
-  return total || 0;
+  const counts = new Map();
+  const order = [...walkTree(node)];
+  for (let i = order.length - 1; i >= 0; i--) {
+    const n = order[i];
+    let count = n.ch?.length ? n.ch.reduce((sum, c) => sum + counts.get(c.id), 0) : Number(!state.hiddenTips.has(n.name));
+    if (count && state.collapsedNodes.has(n.id) && n.ch) count = 1;
+    counts.set(n.id, count);
+  }
+  return counts.get(node.id);
 }
 
 export function countAllTips(node) {
   const cached = state.subtreeTipCount[node.id];
   if (cached != null && state.nodeById[node.id] === node) return cached;
-  if (!node.ch) return 1;
-  let total = 0;
-  for (const child of node.ch) total += countAllTips(child);
-  return total;
-}
-
-export function collectAllTipNames(node) {
-  if (!node.ch || node.ch.length === 0) return [node.name];
-  const names = [];
-  for (const child of node.ch) names.push(...collectAllTipNames(child));
-  return names;
-}
-
-export function deepCopyNode(node) {
-  const copy = { ...node };
-  if (node.ch) copy.ch = node.ch.map(deepCopyNode);
-  return copy;
+  let count = 0;
+  for (const n of walkTree(node)) if (!n.ch?.length) count++;
+  return count;
 }
 
 export function indexNodes(node) {

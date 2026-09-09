@@ -52,6 +52,10 @@ function tree(value, field) {
     if (ids.has(dest.id)) invalid(`${field} has duplicate node ids`);
     ids.add(dest.id);
     dest.bl = source.bl == null ? 0 : number(source.bl, `${field} branch length`);
+    if (source.blText != null) {
+      if (typeof source.blText !== "string" || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(source.blText) || Number(source.blText) !== dest.bl) invalid(`${field} branch length token`);
+      dest.blText = source.blText;
+    }
     if (source.name != null) dest.name = string(source.name, `${field} label`);
     if (source.sup != null) dest.sup = number(source.sup, `${field} support`);
     if (source.ch != null) {

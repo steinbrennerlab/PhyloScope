@@ -37,11 +37,11 @@ async function main() {
 
   const h = await harness();
   const { parseNewick } = await h.load("parsers");
-  const { rerootTree, nodeToNewick } = await h.load("tree-ops");
+  const { rerootTree, exportNewickText } = await h.load("tree-ops");
   for (const family of families) {
     const { tree, target } = fixtureTarget(parseNewick, family.name);
     const output = path.join(outputDir, `${family.name}.phyloscope.nwk`);
-    fs.writeFileSync(output, nodeToNewick(rerootTree(tree, target.id)) + ";");
+    fs.writeFileSync(output, exportNewickText(rerootTree(tree, target.id)));
     validate(family.name, "phyloscope", output);
   }
 }

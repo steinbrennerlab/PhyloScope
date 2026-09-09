@@ -10,24 +10,21 @@ function normalizeLeaves(leaves) {
 }
 
 function collectExperimentalSplitEntries(value, entries = [], path = ["root"]) {
-  if (!value || typeof value !== "object") return entries;
-
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => {
-      collectExperimentalSplitEntries(item, entries, [...path, String(index)]);
-    });
-    return entries;
+  const stack = [{ value, path: { key: path.join("."), parent: null } }];
+  while (stack.length) {
+    const { value: item, path: currentPath } = stack.pop();
+    if (!item || typeof item !== "object") continue;
+    if (!Array.isArray(item) && (Array.isArray(item.slow_leaves) || Array.isArray(item.fast_leaves))) {
+      const keys = [];
+      for (let link = currentPath; link; link = link.parent) keys.push(link.key);
+      entries.push({ split: item, path: keys.reverse().join(".") });
+    }
+    const children = Object.entries(item);
+    for (let i = children.length - 1; i >= 0; i--) {
+      const [key, child] = children[i];
+      if (key !== "slow_leaves" && key !== "fast_leaves") stack.push({ value: child, path: { key, parent: currentPath } });
+    }
   }
-
-  if (Array.isArray(value.slow_leaves) || Array.isArray(value.fast_leaves)) {
-    entries.push({ split: value, path: path.join(".") });
-  }
-
-  Object.entries(value).forEach(([key, child]) => {
-    if (key === "slow_leaves" || key === "fast_leaves") return;
-    collectExperimentalSplitEntries(child, entries, [...path, key]);
-  });
-
   return entries;
 }
 

@@ -24,4 +24,16 @@ Generated Newick files and complete validator logs are retained in a uniquely na
 
 ## Root-edge representation
 
-PhyloScope splits the selected stem at its numeric midpoint and assigns the second half as `length - firstHalf`, retaining the summed length without output rounding. Both children carry the stem support. The fixture's known-good files round the root halves to six decimal places; comparison is by the original bipartition and summed root-edge length, not byte-identical Newick text. Preserving source trailing zeros and adding a final newline remain separate export-formatting tasks in `plan.md`.
+PhyloScope splits the selected stem at its numeric midpoint and assigns the second half as `length - firstHalf`, retaining the summed length without output rounding. Both children carry the stem support. The fixture's known-good files round the root halves to six decimal places; comparison is by the original bipartition and summed root-edge length, not byte-identical Newick text. Unchanged edges preserve their exact source length tokens; split/combined edges use shortest round-trip numeric spelling. Exported Newick ends in `;` followed by a newline. Tests verify unchanged tokens by bipartition in all three families.
+
+## Calculation and large-input regressions
+
+`remaining.test.cjs` checks case-independent identity and positive-score similarity against every entry in the public-domain NCBI BLOSUM62 source pinned as `fixtures/blosum62.c`, credited to Aaron Ucko and Mike Gertz. PROSITE fixtures follow the [official user manual](https://prosite.expasy.org/prosuser.html), including `<A-x-[ST](2)-x(0,1)-V.` and a final `[G>]` alternative.
+
+The suite also exercises a 10,000-tip by 20-column heatmap, strict numeric parsing, duplicate identifier rejection, shared file/session diagnostics, a 10,000-level tree through normal/fast rendering in all layouts, and stack-safe JSON session export. Domain tests can load modules with no `document` in their execution context.
+
+GitHub Actions (`.github/workflows/test.yml`) runs the Node suite, independent Python validator, and build on Node 22 and 24. It fails if rebuilding changes committed `docs/` assets. The workflow will first execute after these changes are pushed.
+
+## Browser verification still pending
+
+No browser was connected for this pass (`agent.browsers.list()` returned `[]`). Before marking Q3 complete, exercise the built app both from disk and a static HTTP server: import a pinned family and alignment/dataset, select and reroot the outgroup, undo/redo, switch all three layouts and fast mode, export Newick/SVG/PNG/PDF, save and replace a session, then verify replacement clears old undo history. Compare the downloaded Newick using the pinned validator. DOM stand-ins do not establish this interactive behavior.

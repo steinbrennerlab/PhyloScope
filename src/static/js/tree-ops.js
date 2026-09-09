@@ -3,7 +3,8 @@
  * Ports of tree manipulation functions from app.py.
  */
 
-import { collectAllTipNames } from "./tree-utils.js";
+import { collectAllTipNames, walkTree } from "./tree-traversal.js";
+import { blosum62Score } from "./blosum62.js";
 
 export const DEFAULT_SPECIES_INFER_PATTERN = "^([A-Za-z]{2}).*$";
 export const DEFAULT_SPECIES_INFER_REPLACEMENT = "$1";
@@ -57,24 +58,30 @@ export function buildApeNodeNumbers(root) {
  * Convert a tree node to Newick string (no trailing semicolon).
  */
 export function nodeToNewick(node) {
-  if (node.ch && node.ch.length > 0) {
-    const childStrs = node.ch.map(c => nodeToNewick(c)).join(",");
-    let s = `(${childStrs})`;
-    if (node.sup != null) {
-      s += String(node.sup);
-    } else if (node.name) {
-      s += quoteNewickLabel(node.name, true);
+  const output = [];
+  const stack = [node];
+  while (stack.length) {
+    const item = stack.pop();
+    if (typeof item === "string") { output.push(item); continue; }
+    const internal = !!item.ch?.length;
+    let suffix = internal && item.sup != null ? String(item.sup) : quoteNewickLabel(item.name || "", internal);
+    // Only reuse a token while its numeric value still describes this edge.
+    const raw = item.blText;
+    if (typeof raw === "string" && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(raw) && Number(raw) === item.bl) suffix += `:${raw}`;
+    else if (item.bl != null && item.bl !== 0) suffix += `:${item.bl}`;
+    if (!internal) { output.push(suffix); continue; }
+    stack.push(")" + suffix);
+    for (let i = item.ch.length - 1; i >= 0; i--) {
+      stack.push(item.ch[i]);
+      if (i > 0) stack.push(",");
     }
-    if (node.bl != null && node.bl !== 0) {
-      s += `:${node.bl}`;
-    }
-    return s;
+    output.push("(");
   }
-  let s = quoteNewickLabel(node.name || "");
-  if (node.bl != null && node.bl !== 0) {
-    s += `:${node.bl}`;
-  }
-  return s;
+  return output.join("");
+}
+
+export function exportNewickText(node) {
+  return nodeToNewick(node) + ";\n";
 }
 
 function quoteNewickLabel(label, internal = false) {
@@ -89,13 +96,7 @@ function quoteNewickLabel(label, internal = false) {
  * Find a node by its ID in the tree.
  */
 export function findNodeById(node, targetId) {
-  if (node.id === targetId) return node;
-  if (node.ch) {
-    for (const c of node.ch) {
-      const result = findNodeById(c, targetId);
-      if (result) return result;
-    }
-  }
+  for (const current of walkTree(node)) if (current.id === targetId) return current;
   return null;
 }
 
@@ -104,19 +105,17 @@ export function findNodeById(node, targetId) {
  * Modifies the tree in-place.
  */
 export function annotateSpecies(node, tipToSpecies) {
-  if (!node.ch || node.ch.length === 0) {
-    const sp = tipToSpecies[node.name] || "unknown";
-    node.sp = sp;
-    return new Set([sp]);
-  }
-  const descSpecies = new Set();
-  for (const child of node.ch) {
-    for (const sp of annotateSpecies(child, tipToSpecies)) {
-      descSpecies.add(sp);
+  const order = [...walkTree(node)];
+  for (let i = order.length - 1; i >= 0; i--) {
+    const current = order[i];
+    if (!current.ch?.length) current.sp = tipToSpecies[current.name] || "unknown";
+    else {
+      const species = new Set();
+      for (const child of current.ch) for (const sp of child.ch?.length ? child.descendant_species : [child.sp]) species.add(sp);
+      current.descendant_species = [...species].sort();
     }
   }
-  node.descendant_species = [...descSpecies].sort();
-  return descSpecies;
+  return new Set(node.ch?.length ? node.descendant_species : [node.sp]);
 }
 
 /**
@@ -221,7 +220,7 @@ export function findNodesWithSpecies(node, requiredSpecies, excludedSpecies) {
     return new Set(n.descendant_species || []);
   }
 
-  function walk(n) {
+  for (const n of walkTree(node)) {
     const ds = getDescSpecies(n);
     let hasAll = true;
     for (const sp of required) {
@@ -234,12 +233,8 @@ export function findNodesWithSpecies(node, requiredSpecies, excludedSpecies) {
       }
       if (!hasExcluded) result.push(n.id);
     }
-    if (n.ch) {
-      for (const c of n.ch) walk(c);
-    }
   }
 
-  walk(node);
   return result;
 }
 
@@ -275,7 +270,7 @@ export function rerootTree(treeData, targetId) {
     if (node.id === targetId) target = node;
     neighbors(node);
     for (const child of node.ch || []) {
-      connect(node, child, { length: child.bl || 0, support: child.sup });
+      connect(node, child, { length: child.bl || 0, support: child.sup, text: child.blText });
       parents.set(child, node);
       stack.push(child);
     }
@@ -329,6 +324,8 @@ export function rerootTree(treeData, targetId) {
   while (pending.length) {
     const { node, parent, edge } = pending.pop();
     delete node.sup;
+    delete node.blText;
+    if (edge?.text != null) node.blText = edge.text;
     node.bl = edge ? edge.length : 0;
     if (edge?.support != null) node.sup = edge.support;
     const children = neighbors(node).filter(item => item.node !== parent);
@@ -364,18 +361,7 @@ export function refPosToColumns(refSeqGapped, refStart, refEnd) {
 /**
  * Compute pairwise sequence identity between two gapped sequences.
  */
-// BLOSUM62 positive-score pairs (similarity groups)
-const BLOSUM62_SIMILAR = new Set([
-  "AG","AS","DE","DN","EK","EQ","FW","FY","HN","HQ","HY",
-  "IL","IM","IV","KQ","KR","LM","LV","MV","NQ","NS","ST","WY",
-]);
-
-function areSimilar(a, b) {
-  if (a === b) return true;
-  const pair = a < b ? a + b : b + a;
-  return BLOSUM62_SIMILAR.has(pair);
-}
-
+// Similarity counts strictly positive BLOSUM62 scores; unknown symbols are not positive.
 export function computePairwiseIdentity(seq1, seq2) {
   if (seq1.length !== seq2.length) {
     return { error: "Sequences have different lengths in alignment" };
@@ -384,11 +370,11 @@ export function computePairwiseIdentity(seq1, seq2) {
   let similar = 0;
   let aligned = 0;
   for (let i = 0; i < seq1.length; i++) {
-    const a = seq1[i], b = seq2[i];
+    const a = seq1[i].toUpperCase(), b = seq2[i].toUpperCase();
     if (a === "-" || b === "-") continue;
     aligned++;
-    if (a === b) { identical++; similar++; }
-    else if (areSimilar(a.toUpperCase(), b.toUpperCase())) { similar++; }
+    if (a === b) identical++;
+    if (blosum62Score(a, b) > 0) similar++;
   }
   return {
     identity: aligned > 0 ? identical / aligned : 0,
