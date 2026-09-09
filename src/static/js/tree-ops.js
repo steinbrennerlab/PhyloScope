@@ -126,8 +126,8 @@ export function annotateSpecies(node, tipToSpecies) {
  */
 export function buildSpeciesMapFromFiles(treeData, orthoFiles) {
   const treeTips = new Set(collectAllTipNames(treeData));
-  const speciesToTips = {};
-  const tipToSpecies = {};
+  const speciesTips = new Map();
+  const assignments = new Map();
 
   const REF_SPECIES = {
     "Pvul218cds": "Pvul",
@@ -136,19 +136,17 @@ export function buildSpeciesMapFromFiles(treeData, orthoFiles) {
     "Zmarina_668_v3.1.cds_primaryTranscriptOnly": "Zmarina",
   };
 
-  const sorted = [...orthoFiles].sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = [...orthoFiles].sort((a, b) => (a.path || a.name).localeCompare(b.path || b.name));
 
   for (const file of sorted) {
-    let fname = file.name;
-    if (fname.endsWith(".fasta")) fname = fname.slice(0, -6);
-    else if (fname.endsWith(".fa")) fname = fname.slice(0, -3);
+    const fname = file.name.replace(/\\/g, "/").split("/").pop().replace(/\.(fasta|fa)$/i, "");
 
     let species;
     if (fname.startsWith("new_genomes.")) {
       const parts = fname.replace("new_genomes.", "").split(".");
       species = parts[0];
     } else {
-      species = REF_SPECIES[fname] || fname;
+      species = Object.hasOwn(REF_SPECIES, fname) ? REF_SPECIES[fname] : fname;
     }
 
     const headers = new Set();
@@ -160,14 +158,27 @@ export function buildSpeciesMapFromFiles(treeData, orthoFiles) {
 
     const matchingTips = [...headers].filter(h => treeTips.has(h)).sort();
     if (matchingTips.length > 0) {
-      speciesToTips[species] = matchingTips;
+      if (!speciesTips.has(species)) speciesTips.set(species, new Set());
       for (const tip of matchingTips) {
-        tipToSpecies[tip] = species;
+        speciesTips.get(species).add(tip);
+        if (!assignments.has(tip)) assignments.set(tip, new Map());
+        const origins = assignments.get(tip);
+        if (!origins.has(species)) origins.set(species, new Set());
+        origins.get(species).add(file.path || file.name);
       }
     }
   }
 
-  return { speciesToTips, tipToSpecies };
+  const conflicts = [...assignments].filter(([, origins]) => origins.size > 1);
+  if (conflicts.length) {
+    const examples = conflicts.slice(0, 10).map(([tip, origins]) =>
+      `${tip}: ${[...origins].map(([species, paths]) => `${species} (${[...paths].join(", ")})`).join(" vs ")}`);
+    throw new Error(`Conflicting species assignments for ${conflicts.length} tree tip(s): ${examples.join("; ")}. Choose the correct run/folder or correct the species FASTA headers before loading.`);
+  }
+  return {
+    speciesToTips: Object.fromEntries([...speciesTips].map(([species, tips]) => [species, [...tips].sort()])),
+    tipToSpecies: Object.fromEntries([...assignments].map(([tip, origins]) => [tip, origins.keys().next().value])),
+  };
 }
 
 /**

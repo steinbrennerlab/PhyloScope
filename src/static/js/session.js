@@ -118,12 +118,13 @@ export function validateSession(input) {
     record(session.sourceTexts, "sourceTexts");
     string(session.sourceTexts.nwk, "sourceTexts.nwk");
     if (session.sourceTexts.aa != null) string(session.sourceTexts.aa, "sourceTexts.aa");
-    for (const field of ["nwkName", "aaName"]) {
+    for (const field of ["nwkName", "aaName", "importScope"]) {
       if (session.sourceTexts[field] != null) string(session.sourceTexts[field], `sourceTexts.${field}`);
     }
     for (const field of ["ortho", "datasets"]) {
       if (session.sourceTexts[field] != null) array(session.sourceTexts[field], `sourceTexts.${field}`, (item, key) => {
         record(item, key); string(item.name, key); string(item.text, key);
+        if (item.path != null) string(item.path, `${key} path`);
         return item;
       });
     }

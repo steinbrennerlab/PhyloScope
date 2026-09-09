@@ -27,6 +27,14 @@
         <span class="detected-tag detected-required">required</span>
       </div>
       <div class="detected-row">
+        <label class="detected-label" for="import-scope">Companion files:</label>
+        <select id="import-scope" class="detected-select">
+          <option value="tree">Selected tree's run/folder</option>
+          <option value="all">All selected folders (override)</option>
+        </select>
+      </div>
+      <div id="import-scope-hint" class="setup-inline-hint" role="status"></div>
+      <div class="detected-row">
         <label class="detected-label">Alignment (FASTA):</label>
         <select id="detected-aa" class="detected-select"></select>
         <span class="detected-tag detected-optional">optional</span>
@@ -85,12 +93,12 @@
       <button id="setup-load-session" class="btn" style="flex:1;">Load saved session</button>
     </div>
     <div class="setup-hint">
-      <p>Required folder structure:</p>
+      <p>Choose a folder containing your tree. All subfolders are searched, including <code>hits/orthofinder-input/</code> in BAT runs.</p>
       <pre>  your-folder/
-    *.nwk                &mdash; Newick tree file (exactly one, required)
+    *.nwk                &mdash; Newick trees (choose one to load)
     *.aa.fa              &mdash; Preferred default protein alignment (optional)
     *.fa / *.fasta       &mdash; Other protein alignment names also accepted
-    orthofinder-input/   &mdash; Folder of per-species FASTA files (optional)
+    orthofinder-input/   &mdash; Per-species FASTA files, at any depth (optional)
     dataset/             &mdash; Tab-delimited heatmap data (optional)
     *.json               &mdash; Experimental rate-shift split import(s) (optional)</pre>
     </div>

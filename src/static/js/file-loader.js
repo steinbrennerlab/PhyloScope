@@ -1,4 +1,5 @@
 import { collectAllTipNames } from "./tree-traversal.js";
+import { belongsToTreeScope, filePath, treeImportScope } from "./import-scope.js";
 /**
  * File loading infrastructure for PhyloScope standalone mode.
  * Handles folder/file picker input, detects file types, builds workspace.
@@ -38,7 +39,7 @@ function compareAlignmentFiles(a, b) {
   const aPriority = isPreferredAlignmentFileName(a.name) ? 0 : 1;
   const bPriority = isPreferredAlignmentFileName(b.name) ? 0 : 1;
   if (aPriority !== bPriority) return aPriority - bPriority;
-  return a.name.localeCompare(b.name);
+  return a.name.localeCompare(b.name) || getFileLabel(a).localeCompare(getFileLabel(b));
 }
 
 function isSameSelectedFile(a, b) {
@@ -71,28 +72,29 @@ function resolveSpeciesMapping(treeData, orthoTexts, speciesConfig) {
  * @returns {object} Categorized file lists.
  */
 export function detectFiles(files) {
+  files = Array.from(files);
   const nwkFiles = [];
   const aaFiles = [];
   const orthoFiles = [];
   const datasetFiles = [];
   const analysisFiles = [];
 
-  const hasRelativePaths = Array.from(files).some(
-    f => f.webkitRelativePath && f.webkitRelativePath.includes("/")
-  );
+  const hasRelativePaths = files.some(file => getFileLabel(file).includes("/"));
 
   for (const file of files) {
-    const relPath = file.webkitRelativePath || file.name;
+    const folders = getFileLabel(file).split("/").slice(0, -1).map(folder => folder.toLowerCase());
     const name = file.name;
 
     if (hasRelativePaths) {
-      if (relPath.includes("orthofinder-input/") || relPath.includes("orthofinder-input\\")) {
+      // Match a complete directory name at any depth, including BAT's
+      // runs/<timestamp>/hits/orthofinder-input/ layout.
+      if (folders.includes("orthofinder-input")) {
         if (isFastaFileName(name)) {
           orthoFiles.push(file);
         }
         continue;
       }
-      if ((relPath.includes("dataset/") || relPath.includes("dataset\\")) && name.endsWith(".txt")) {
+      if (folders.includes("dataset") && name.endsWith(".txt")) {
         if (!name.endsWith(":Zone.Identifier")) {
           datasetFiles.push(file);
         }
@@ -115,7 +117,7 @@ export function detectFiles(files) {
   }
 
   return {
-    nwkFiles: nwkFiles.sort((a, b) => a.name.localeCompare(b.name)),
+    nwkFiles: nwkFiles.sort((a, b) => a.name.localeCompare(b.name) || getFileLabel(a).localeCompare(getFileLabel(b))),
     aaFiles: aaFiles.sort(compareAlignmentFiles),
     orthoFiles: orthoFiles.sort((a, b) => a.name.localeCompare(b.name)),
     datasetFiles: datasetFiles.sort((a, b) => a.name.localeCompare(b.name)),
@@ -132,10 +134,19 @@ export function detectFiles(files) {
  * @param {File[]} opts.datasetFiles - Dataset .txt files.
  * @param {File[]} opts.experimentalFiles - Experimental analysis JSON files.
  * @param {{mode?: string, pattern?: string, replacement?: string}} opts.speciesConfig
+ * @param {boolean} opts.includeAllFolders - Explicitly allow companion files outside the tree's run/folder.
  * @returns {Promise<{ success: boolean, error?: string, result?: object }>}
  */
-export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles, experimentalFiles, speciesConfig }) {
+export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles, experimentalFiles, speciesConfig, includeAllFolders = false }) {
   if (!nwkFile) return { success: false, error: "No tree file (.nwk) selected." };
+  if (!includeAllFolders) {
+    if (aaFile && !belongsToTreeScope(aaFile, nwkFile)) {
+      return { success: false, error: "The alignment is outside the selected tree's run/folder. Choose an alignment in that scope or explicitly select All selected folders." };
+    }
+    orthoFiles = (orthoFiles || []).filter(file => belongsToTreeScope(file, nwkFile));
+    datasetFiles = (datasetFiles || []).filter(file => belongsToTreeScope(file, nwkFile));
+    experimentalFiles = (experimentalFiles || []).filter(file => belongsToTreeScope(file, nwkFile));
+  }
 
   const nwkText = await nwkFile.text();
   const aaText = aaFile ? await aaFile.text() : null;
@@ -147,7 +158,7 @@ export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles,
     : [];
   const filteredOrthoFiles = (orthoFiles || []).filter(f => !isSameSelectedFile(f, aaFile));
   const orthoTexts = filteredOrthoFiles.length > 0
-    ? await Promise.all(filteredOrthoFiles.map(async f => ({ name: f.name, text: await f.text() })))
+    ? await Promise.all(filteredOrthoFiles.map(async f => ({ name: f.name, path: filePath(f), text: await f.text() })))
     : [];
   const datasetTexts = await Promise.all(
     (datasetFiles || []).map(async f => ({ name: f.name, text: await f.text() }))
@@ -156,6 +167,7 @@ export async function loadFromFiles({ nwkFile, aaFile, orthoFiles, datasetFiles,
   try {
     return { success: true, result: loadFromSourceTexts({
       nwk: nwkText, nwkName: nwkFile.name, aa: aaText, aaName: aaFile?.name || null,
+      importScope: includeAllFolders ? "all" : treeImportScope(nwkFile),
       speciesConfig, ortho: orthoTexts, datasets: datasetTexts, experimental: experimentalSources,
     }) };
   } catch (error) {

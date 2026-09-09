@@ -28,6 +28,8 @@ PhyloScope splits the selected stem at its numeric midpoint and assigns the seco
 
 ## Calculation and large-input regressions
 
+`file-loader.test.cjs` covers recursive BAT discovery, isolation between runs (including nested tree files), duplicate filenames, explicit cross-folder overrides, no fallback when local data is absent, species-file merging, conflicting assignments, and preservation of the existing workspace/history after a failed file or session import.
+
 `remaining.test.cjs` checks case-independent identity and positive-score similarity against every entry in the public-domain NCBI BLOSUM62 source pinned as `fixtures/blosum62.c`, credited to Aaron Ucko and Mike Gertz. PROSITE fixtures follow the [official user manual](https://prosite.expasy.org/prosuser.html), including `<A-x-[ST](2)-x(0,1)-V.` and a final `[G>]` alternative.
 
 The suite also exercises a 10,000-tip by 20-column heatmap, strict numeric parsing, duplicate identifier rejection, shared file/session diagnostics, a 10,000-level tree through normal/fast rendering in all layouts, and stack-safe JSON session export. Domain tests can load modules with no `document` in their execution context.

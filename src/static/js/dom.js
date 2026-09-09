@@ -10,6 +10,8 @@ export const dom = {
   detectedFilesPanel: document.getElementById("detected-files"),
   detectedNwkSelect: document.getElementById("detected-nwk"),
   detectedAaSelect: document.getElementById("detected-aa"),
+  importScopeSelect: document.getElementById("import-scope"),
+  importScopeHint: document.getElementById("import-scope-hint"),
   detectedExperimentalList: document.getElementById("detected-experimental-list"),
   detectedExperimentalHint: document.getElementById("detected-experimental-hint"),
   detectedExperimentalControls: document.getElementById("detected-experimental-controls"),

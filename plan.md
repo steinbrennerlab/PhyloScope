@@ -4,6 +4,11 @@ Updated 2026-09-09. This is the current review/fix list. The original standalone
 
 ## Fix status, in priority order
 
+### BAT import follow-up completed
+
+- [x] **B1: Scope companion files to the selected tree's run.** All trees remain selectable, but alignments, species files, datasets, and experimental JSON default to that BAT run (or the tree's directory for other layouts). Scope changes refresh the pickers; missing files do not fall back to other runs. An explicit All selected folders override is available. Relative paths distinguish duplicate tree/alignment filenames.
+- [x] **B2: Merge consistent species files and reject conflicting assignments.** Files for the same species contribute a deduplicated union of tips. Cross-species assignments report the tip, species, and source paths and stop file/session import before changing the current workspace. Regression coverage includes run isolation, override behavior, merging, and failure atomicity. The suite now has 37 passing tests.
+
 ### Re-rooting repair completed and verified
 
 - [x] **R1: Preserve support on its bipartition.** Re-rooting now transfers length and support together on undirected edges, including absent support. The old node-attached support-shifting behavior is covered by the pinned negative fixture.

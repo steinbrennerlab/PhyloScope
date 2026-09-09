@@ -38,6 +38,7 @@ import {
   rerootTree,
 } from "./tree-ops.js";
 import { detectFiles, loadFromFiles, loadFromSourceTexts } from "./file-loader.js";
+import { scopeDetectedFiles, treeImportScope } from "./import-scope.js";
 
 let controlsBound = false;
 let startupBound = false;
@@ -465,7 +466,7 @@ function updateSpeciesSourceSetupUi() {
     return;
   }
 
-  const orthoCount = state.stagedFiles?.detected?.orthoFiles?.length || 0;
+  const orthoCount = state.stagedFiles?.scopedDetected?.orthoFiles?.length || 0;
   dom.speciesSourceHint.textContent = orthoCount > 0
     ? "Cross-reference tree tips against orthofinder-input FASTA headers."
     : "No orthofinder species files detected. Load will continue without species labels unless you switch to tip-label inference.";
@@ -1492,6 +1493,10 @@ function showLoadedInfo(totalTips) {
     lines.push(`<span class="loaded-label">Species:</span> <span class="loaded-none">none</span>`);
   }
   lines.push(`<span class="loaded-label">Species source:</span> <span class="loaded-value">${escapeHtml(getSpeciesSourceLabel())}</span>`);
+  if (state.sourceTexts?.importScope != null) {
+    const scope = state.sourceTexts.importScope;
+    lines.push(`<span class="loaded-label">Import scope:</span> <span class="loaded-value">${escapeHtml(scope === "all" ? "All selected folders" : scope || "Selected files")}</span>`);
+  }
   lines.push(`<span class="loaded-label">Datasets:</span> <span class="loaded-value">${state.datasetFiles.length}</span>`);
   const experimentalSummary = getExperimentalSummary();
   lines.push(
@@ -2896,6 +2901,7 @@ function populateExperimentalFileList(files) {
 function handleFilesSelected(files) {
   const detected = detectFiles(files);
   state.stagedFiles = { detected, allFiles: files };
+  dom.importScopeSelect.value = "tree";
 
   // Populate detected files panel
   dom.detectedFilesPanel.style.display = "";
@@ -2904,7 +2910,7 @@ function handleFilesSelected(files) {
 
   // Tree select
   const nwkSelect = dom.detectedNwkSelect;
-  nwkSelect.innerHTML = "";
+  nwkSelect.replaceChildren();
   if (detected.nwkFiles.length === 0) {
     const opt = document.createElement("option");
     opt.value = "";
@@ -2913,34 +2919,50 @@ function handleFilesSelected(files) {
   } else {
     detected.nwkFiles.forEach(f => {
       const opt = document.createElement("option");
-      opt.value = f.name;
-      opt.textContent = f.name;
+      opt.value = getFilePickerKey(f);
+      opt.textContent = getFilePickerKey(f);
       nwkSelect.appendChild(opt);
     });
+    nwkSelect.value = getFilePickerKey(detected.nwkFiles[0]);
   }
+  updateScopedSetupFiles({ resetAlignment: true });
+}
+
+function updateScopedSetupFiles({ resetAlignment = false } = {}) {
+  if (!state.stagedFiles) return;
+  const all = state.stagedFiles.detected;
+  const tree = all.nwkFiles.find(file => getFilePickerKey(file) === dom.detectedNwkSelect.value);
+  const includeAllFolders = dom.importScopeSelect.value === "all";
+  const detected = scopeDetectedFiles(all, tree, includeAllFolders);
+  state.stagedFiles.scopedDetected = detected;
+  const scope = treeImportScope(tree);
+  dom.importScopeHint.textContent = includeAllFolders
+    ? "Using companion files from all selected folders. Species assignment conflicts will stop loading."
+    : scope ? `Alignment, species files, datasets, and experimental JSON are limited to ${scope} and its subfolders.`
+      : "Using explicitly selected files; no folder paths are available.";
 
   // Alignment select
   const aaSelect = dom.detectedAaSelect;
-  aaSelect.innerHTML = "";
+  const previousAlignment = aaSelect.value;
+  aaSelect.replaceChildren();
   const noneOpt = document.createElement("option");
   noneOpt.value = "";
   noneOpt.textContent = "None";
   aaSelect.appendChild(noneOpt);
   detected.aaFiles.forEach(f => {
     const opt = document.createElement("option");
-    opt.value = f.name;
-    opt.textContent = f.name;
+    opt.value = getFilePickerKey(f);
+    opt.textContent = getFilePickerKey(f);
     aaSelect.appendChild(opt);
   });
-  if (detected.aaFiles.length > 0) {
-    aaSelect.value = detected.aaFiles[0].name;
-  }
+  const keepPrevious = !resetAlignment && (previousAlignment === "" || detected.aaFiles.some(file => getFilePickerKey(file) === previousAlignment));
+  aaSelect.value = keepPrevious ? previousAlignment : detected.aaFiles.length ? getFilePickerKey(detected.aaFiles[0]) : "";
 
   populateExperimentalFileList(detected.analysisFiles);
 
   // Orthofinder
   dom.detectedOrthoSpan.textContent = detected.orthoFiles.length > 0
-    ? `${detected.orthoFiles.length} species files found`
+    ? `${detected.orthoFiles.length} species files found (including subfolders)`
     : "no species files found";
   dom.detectedOrthoSpan.style.color = detected.orthoFiles.length > 0 ? "#27ae60" : "#888";
 
@@ -2963,7 +2985,7 @@ async function doSetupLoad() {
     return;
   }
 
-  const detected = state.stagedFiles.detected;
+  const all = state.stagedFiles.detected;
   const nwkName = dom.detectedNwkSelect.value;
   const aaName = dom.detectedAaSelect.value;
   const experimentalNames = new Set(getSelectedExperimentalFileKeys());
@@ -2974,8 +2996,14 @@ async function doSetupLoad() {
     return;
   }
 
-  const nwkFile = detected.nwkFiles.find(f => f.name === nwkName);
-  const aaFile = aaName ? detected.aaFiles.find(f => f.name === aaName) : null;
+  const nwkFile = all.nwkFiles.find(f => getFilePickerKey(f) === nwkName);
+  const includeAllFolders = dom.importScopeSelect.value === "all";
+  const detected = scopeDetectedFiles(all, nwkFile, includeAllFolders);
+  const aaFile = aaName ? detected.aaFiles.find(f => getFilePickerKey(f) === aaName) : null;
+  if (aaName && !aaFile) {
+    dom.setupError.textContent = "The selected alignment is outside the current scope. Choose an alignment from this run/folder or use All selected folders.";
+    return;
+  }
   const experimentalFiles = detected.analysisFiles.filter(f => experimentalNames.has(getFilePickerKey(f)));
 
   dom.setupError.textContent = "";
@@ -2990,6 +3018,7 @@ async function doSetupLoad() {
       datasetFiles: detected.datasetFiles,
       experimentalFiles,
       speciesConfig,
+      includeAllFolders,
     });
 
     if (!loadResult.success) {
@@ -3151,6 +3180,8 @@ function bindStartupControls() {
     }
   });
   dom.speciesSourceSelect.addEventListener("change", updateSpeciesSourceSetupUi);
+  dom.detectedNwkSelect.addEventListener("change", () => updateScopedSetupFiles({ resetAlignment: true }));
+  dom.importScopeSelect.addEventListener("change", () => updateScopedSetupFiles());
   dom.detectedExperimentalSelectAllBtn.addEventListener("click", () => setExperimentalFileSelections(true));
   dom.detectedExperimentalClearBtn.addEventListener("click", () => setExperimentalFileSelections(false));
 
